@@ -1,0 +1,4 @@
+# Keep line endings the same on every OS, so files pushed into the game are
+# identical whichever machine pushed them.
+* text=auto eol=lf
+*.gem binary

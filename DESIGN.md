@@ -30,7 +30,10 @@ process on your machine, and borrows the game's `ns` over a WebSocket:
   what makes the game skip its own static scan of the stub (whose real calls are dynamic, `ns[name](...)`).
 - **The proxy** (`lib/afterburner/proxy.js`, pushed as `afterburner/proxy.js`) holds `serve()`. It connects to
   `ws://localhost:<port>/script`, sends `start`, then loops: make the call it's asked to, send back the result.
-  It closes the socket in `atExit`, so killing the stub stops the Ruby script.
+  It closes the socket in `atExit`, so killing the stub stops the Ruby script. If afterburner isn't there, it
+  retries every 2 s for a minute before failing: a save that loads restarts its scripts at once, possibly
+  before afterburner is up. On the server side, a script that arrives before the game has sent its
+  definitions waits up to 30 s for them.
 - **Session** (`session.rb`) runs one script. One Async task runs the script; another reads the socket. A
   closed socket cancels the script task wherever it is (inside an `ns` call, or in Ruby's own `sleep`), and its
   `at_exit` blocks run.
