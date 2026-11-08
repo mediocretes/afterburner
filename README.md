@@ -23,6 +23,8 @@ afterburner is one local process that:
 From the game's side, `scout.rb` is just `scout.js`: `run`, `kill`, `ps`, threads, and RAM all work as
 usual, and the game charges a Ruby script for the functions it calls, exactly as it would JavaScript.
 
+![A Ruby script's output in the game's terminal, in the Steam build](docs/steam.png)
+
 ## Quick start
 
 You need Ruby 3.4 or newer and Bitburner v3.
