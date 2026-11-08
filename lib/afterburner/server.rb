@@ -44,6 +44,7 @@ module Afterburner
       @log = log
       @origins = DEFAULT_ORIGINS + config.origins
       @scripts = Scripts.new(config.src)
+      RedefinitionWarnings.serve(@scripts.root)
       @costs = RamCosts.new(config.costs)
       @stubs = Stubs.new(scripts: @scripts, definitions: config.definitions, costs: @costs, port: config.port,
                          twins: [config.dist, config.src].compact, log:)
@@ -119,19 +120,17 @@ module Afterburner
     # Through require, not load: a plain load evaluates under the thread's
     # current top-level wrapper, which belongs to whichever script fiber last
     # entered a wrapped load, so the library would land inside that script's
-    # module. require always evaluates at the real top level.
+    # module. require always evaluates at the real top level. Its constants
+    # get redefined, which is the point; RedefinitionWarnings keeps Ruby quiet
+    # about that.
     def reload_libraries(changed)
       loaded = $LOADED_FEATURES.to_set
       changed.select { loaded.include?(_1) }.each do |file|
-        verbose = $VERBOSE
-        $VERBOSE = nil # constants get redefined; that's the point
         $LOADED_FEATURES.delete(file)
         require(file)
         @log.info("reloaded #{file.delete_prefix("#{@scripts.root}/")}")
       rescue ScriptError, StandardError => e
         @log.warn("reloading #{file.delete_prefix("#{@scripts.root}/")} failed: #{e.message}")
-      ensure
-        $VERBOSE = verbose
       end
     end
 

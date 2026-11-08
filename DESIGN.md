@@ -166,7 +166,11 @@ whose files (its script plus whatever it `require_relative`s, from the RAM scan)
    `require`d). Not `load`: a plain `load` evaluates under the thread's current top-level wrapper, and that
    state is per thread, not per fiber, so while any script sits paused inside its own wrapped `load`, a
    library re-`load`ed from the server lands inside that script's anonymous module. `require` always
-   evaluates at the real top level.
+   evaluates at the real top level. Its constants get redefined, and so do a monkeypatch's on every run, so
+   `RedefinitionWarnings` (a `Warning.warn` filter) drops Ruby's "already initialized constant" and "previous
+   definition of" warnings for files under the scripts folder; they would only land in a script's terminal. A
+   failed reload leaves the library out of `$LOADED_FEATURES`, so the next run's `require_relative` loads it,
+   which is when they used to show.
 2. `Session#reload` rescans the script and checks the RAM. The game charges each distinct function once per
    process, so what the new code needs is the base cost plus everything the session has called so far plus
    everything the new code calls. If that exceeds the stub's claim (`ram` from `start`), the old code keeps

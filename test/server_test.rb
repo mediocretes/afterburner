@@ -317,6 +317,42 @@ class ServerTest < Minitest::Test
     assert_equal %w[v1 v2], printed
   end
 
+  # A reload that fails takes the library out of $LOADED_FEATURES, so after the
+  # fix the next run's require_relative evaluates it again over the classes the
+  # last good load left behind. Ruby's "already initialized constant" warning
+  # mustn't reach the script's terminal.
+  def test_a_library_fixed_after_a_failed_reload_loads_quietly
+    library = "class QuietReloadHelper\n  TABLE = { tag: 'v1' }.freeze\n  def self.tag = TABLE[:tag]\nend\n"
+    printed = []
+    serve(files: { "src/uses.rb" => "require_relative 'lib/helper'\nputs QuietReloadHelper.tag", "src/lib/helper.rb" => library }) do |dir, log|
+      run = lambda do
+        connect("/script") do |connection|
+          transmit(connection, op: "start", script: "uses.rb", args: [], pid: 1, ram: 1.6)
+          while (message = receive(connection))
+            break unless %w[call costs].include?(message["op"])
+            next transmit(connection, op: "costs", costs: {}) if message["op"] == "costs"
+
+            printed << message["args"].first if message["path"] == ["tprint"]
+            transmit(connection, op: "result", id: message["id"], value: nil)
+          end
+        end
+      end
+      save = lambda do |text, seconds_ahead|
+        write(dir, "src/lib/helper.rb", text)
+        File.utime(Time.now + seconds_ahead, Time.now + seconds_ahead, File.join(dir, "src/lib/helper.rb"))
+        sleep 0.8 # a tick or so
+      end
+      run.call
+      save.call("#{library}end\n", 5) # a syntax error: the reload fails
+      eventually { log.string.include?("reloading lib/helper.rb failed") }
+      save.call(library.sub("v1", "v2"), 10)
+      run.call
+    end
+    assert_equal %w[v1 v2], printed
+  ensure
+    Object.send(:remove_const, :QuietReloadHelper) if Object.const_defined?(:QuietReloadHelper)
+  end
+
   def test_ns_and_logger_work_anywhere_in_a_scripts_code
     library = "class Numeric\n  def af_plus_level = self + ns.hacking_level\nend\n" \
               "class AfTalker\n  def self.go = logger.info('from a class')\nend\n"

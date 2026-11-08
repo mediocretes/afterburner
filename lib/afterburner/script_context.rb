@@ -57,6 +57,31 @@ module Afterburner
   end
   ::Kernel.include(ScriptAccess)
 
+  # Drops Ruby's warnings about redefined constants ("already initialized
+  # constant", "previous definition of") when they come from a file under a
+  # scripts folder afterburner serves. Libraries are evaluated at the real top
+  # level and loaded again when they change, and Ruby's own classes are shared
+  # by every run, so a constant in a library or a monkeypatch is redefined as a
+  # matter of course; the warning would only land in a script's terminal. Any
+  # other warning, and these from anywhere else, pass through.
+  module RedefinitionWarnings
+    REDEFINED = /\A[^\n]*?:\d+: warning: (?:already initialized constant|previous definition of) /
+
+    @roots = Set.new
+
+    def self.serve(root)
+      @roots << "#{File.expand_path(root)}/"
+      @roots << "#{File.realpath(root)}/" if File.exist?(root)
+    end
+
+    def self.drop?(message) = message.match?(REDEFINED) && @roots.any? { message.start_with?(_1) }
+
+    def warn(message, category: nil, **)
+      super unless RedefinitionWarnings.drop?(message.to_s)
+    end
+  end
+  ::Warning.extend(RedefinitionWarnings)
+
   # Stands in for $stdout and $stderr while afterburner serves. Writes from
   # inside a script go to that script's terminal output in the game; writes
   # from anywhere else go to the real stream. So puts, print, p, and warn work
