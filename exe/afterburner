@@ -18,6 +18,10 @@ require_relative "../lib/afterburner"
 # async uses IO::Buffer, which warns on every start.
 Warning[:experimental] = false
 
+# Started without LANG, Ruby would take files to be ASCII. Scripts should read
+# and write text the same however afterburner was started.
+Encoding.default_external = Encoding::UTF_8
+
 flags = {}
 console_ram = 4.0
 parser = OptionParser.new do |opts|

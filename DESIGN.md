@@ -3,8 +3,8 @@
 This is the design document: enough to pick the project up cold. The README covers using it.
 
 Status: 0.1.0, a working prototype. Verified end to end against the live web game (v3.0.1) in a headless
-browser (`rake e2e`, 15 checks), and by hand in the Steam build on macOS. Unit tests pass on Linux, macOS,
-and Windows; not yet tried against the game on Windows.
+browser (`rake e2e`, 15 checks), and by hand in the Steam build on macOS and Windows. Unit tests pass on
+Linux, macOS, and Windows.
 
 ## The shape of it
 
@@ -201,8 +201,10 @@ It is not a sandbox for the Ruby you write.
 - **Steam build**: loads the game with `window.loadFile("index.html")`, and its WebSockets carry
   `Origin: file://` (seen on macOS). It sets no permission handler, so Electron grants local network access
   without asking. It also disables background throttling: scripts keep full speed when the window isn't
-  focused, unlike a background Chrome tab. Tested by hand on macOS.
-- **Windows**: nothing intentionally Unix-only; `async`/`io-event` support Windows. Untested.
+  focused, unlike a background Chrome tab. Tested by hand on macOS and Windows.
+- **Windows**: tested by hand with the Steam build (Ruby 4.0.7 from RubyInstaller with DevKit), and the
+  unit tests run there in CI. `io-event` uses its pure-Ruby `select` backend there. In PowerShell, run
+  `ridk.cmd` rather than `ridk`: the default execution policy blocks `ridk.ps1`.
 
 ## Known limits
 
@@ -230,6 +232,11 @@ What's most likely to break, and what watches for it:
 - **The game's origin.** The web build's is fixed; Steam's is `file://` (seen on macOS). If either
   changes, `--origin` accepts the new one without a code change, and `--verbose` logs every connection's
   origin.
+
+- **The locale.** Started without `LANG` (from a launcher, a scheduler, an editor), Ruby takes files to be
+  US-ASCII, and the game's definitions file isn't ASCII. afterburner reads every text file as UTF-8
+  (`Afterburner.read_text`), and the CLI sets `Encoding.default_external` to UTF-8 so scripts behave as they do
+  in a terminal.
 
 `--verbose` logs every message between afterburner and running scripts.
 

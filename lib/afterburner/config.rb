@@ -36,7 +36,7 @@ module Afterburner
       file = File.join(dir, "filesync.json")
       return nil unless File.exist?(file)
 
-      json = JSON.parse(File.read(file))
+      json = JSON.parse(Afterburner.read_text(file))
       raise ConfigError, "#{file} should hold a JSON object" unless json.is_a?(Hash)
 
       json
