@@ -36,6 +36,16 @@ class ConfigTest < Minitest::Test
     end
   end
 
+  def test_the_scripts_folder_can_come_from_the_environment
+    Dir.mktmpdir do |dir|
+      ENV["AFTERBURNER_SRC"] = "ruby"
+      assert Afterburner::Config.load(dir).src.end_with?("/ruby")
+      assert Afterburner::Config.load(dir, src: "other").src.end_with?("/other"), "a flag still wins"
+    ensure
+      ENV.delete("AFTERBURNER_SRC")
+    end
+  end
+
   def test_flags_win
     Dir.mktmpdir do |dir|
       File.write(File.join(dir, "filesync.json"), JSON.generate(port: 13_000))

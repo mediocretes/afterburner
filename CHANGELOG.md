@@ -13,3 +13,5 @@ First version.
 - `afterburner console`, `save`, `ram`, and `stub`.
 - `--verbose`, `--origin`, and `--no-reload`.
 - Scripts restarted by a loading save wait for afterburner rather than failing.
+- Double-clickable launchers for macOS and Windows that install what's missing and start everything, with the
+  scripts folder set at the top; `AFTERBURNER_SRC` sets it for afterburner too.

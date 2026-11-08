@@ -190,6 +190,7 @@ It is not a sandbox for the Ruby you write.
 | `lib/afterburner/scripts.rb` | which files are scripts; safe name resolution |
 | `lib/afterburner/config.rb` | settings from `filesync.json` and flags |
 | `lib/afterburner/proxy.js` | the in-game half |
+| `launchers/` | double-clickable starters to copy into a project: install what's missing, then run the watch |
 | `test/*_test.rb` | unit tests (`rake test`); server tests play the game over real sockets |
 | `test/e2e/run.mjs` | the live-game test (`rake e2e`) |
 
