@@ -1,0 +1,9 @@
+/.bundle/
+/vendor/
+/pkg/
+*.gem
+.afterburner/
+NetscriptDefinitions.d.ts
+node_modules/
+/tmp/
+test/e2e/node_modules/

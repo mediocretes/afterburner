@@ -1,0 +1,107 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# afterburner: write Bitburner scripts in Ruby.
+#
+#   afterburner watch            serve the game: sync files, run Ruby scripts
+#   afterburner console          IRB with `ns` live in the game
+#   afterburner save [FILE]      download the game's live save
+#   afterburner ram FILE...      RAM a script needs: .rb scanned here, others asked of the game
+#   afterburner stub FILE.rb     print the stub the game runs for a Ruby script
+
+require "logger"
+require "net/http"
+require "optparse"
+require "uri"
+require_relative "../lib/afterburner"
+
+# async uses IO::Buffer, which warns on every start.
+Warning[:experimental] = false
+
+flags = {}
+console_ram = 4.0
+parser = OptionParser.new do |opts|
+  opts.banner = <<~TEXT
+    Usage: afterburner COMMAND [options]
+
+    Commands:
+      watch            serve the game: sync files, run Ruby scripts
+      console          IRB with `ns` live in the game
+      save [FILE]      download the game's live save
+      ram FILE...      RAM a script needs: .rb scanned here, others asked of the game
+      stub FILE.rb     print the stub the game runs for a Ruby script
+
+    Options:
+  TEXT
+  opts.on("--port N", Integer, "Port (default: filesync.json's, or 12525)") { flags[:port] = _1 }
+  opts.on("--src DIR", "Ruby scripts (default: src)") { flags[:src] = _1 }
+  opts.on("--dist DIR", "Other files to sync to the game (default: filesync.json's scriptsFolder)") { flags[:dist] = _1 }
+  opts.on("--definitions FILE", "Where to keep the game's NetscriptDefinitions.d.ts") { flags[:definitions] = _1 }
+  opts.on("--costs FILE", "RAM costs measured in the game (default: .afterburner/ram-costs.json)") { flags[:costs] = _1 }
+  opts.on("--ram GB", Float, "console: RAM to claim (default: 4)") { console_ram = _1 }
+  opts.on("-v", "--version", "Print the version") do
+    puts Afterburner::VERSION
+    exit
+  end
+end
+command, *arguments = parser.parse(ARGV)
+config = Afterburner::Config.load(**flags)
+out = STDOUT
+out.sync = true
+log = Logger.new(out, formatter: lambda { |severity, time, _program, message|
+  "#{time.strftime('%H:%M:%S')} #{'warning: ' if severity == 'WARN'}#{message}\n"
+})
+
+ask = lambda do |path|
+  Net::HTTP.get_response(URI("http://localhost:#{config.port}#{path}"))
+rescue SystemCallError
+  abort "afterburner isn't running on port #{config.port}. Start it with `afterburner watch`."
+end
+
+case command
+when "watch"
+  # Scripts' puts, p, and warn go to the game's terminal.
+  $stdout = Afterburner::ScriptOutput.new(STDOUT)
+  $stderr = Afterburner::ScriptOutput.new(STDERR)
+  begin
+    Sync { Afterburner::Server.new(config, log:).run }
+  rescue Interrupt
+    out.puts
+  end
+when "console"
+  exit Afterburner::Console.new(port: config.port, ram: console_ram, definitions: config.definitions).run ? 0 : 1
+when "save"
+  response = ask.call("/save")
+  abort response.body unless response.is_a?(Net::HTTPSuccess)
+  path = arguments.first || response["x-afterburner-filename"]
+  File.binwrite(path, response.body)
+  out.puts "saved #{path} (#{response.body.bytesize} bytes)"
+when "ram"
+  abort parser.banner if arguments.empty?
+  arguments.each do |file|
+    if file.end_with?(".rb")
+      abort "No #{config.definitions} yet; the game sends it when it connects to `afterburner watch`." unless File.exist?(config.definitions)
+      costs = Afterburner::RamCosts.new(config.costs)
+      scan = Afterburner::RamScanner.new(Afterburner::Api.load(config.definitions, measured: costs.load)).scan(file)
+      out.puts "#{file}: #{scan.ram} GB = #{scan.breakdown}"
+      scan.unknown.each { out.puts "  #{_1} isn't a Netscript function" }
+    else
+      response = ask.call("/ram?#{URI.encode_www_form(file:)}")
+      abort response.body unless response.is_a?(Net::HTTPSuccess)
+      out.puts "#{file}: #{JSON.parse(response.body)} GB, by the game's count"
+    end
+  end
+when "stub"
+  abort parser.banner if arguments.empty?
+  stubs = Afterburner::Stubs.new(scripts: Afterburner::Scripts.new(config.src), definitions: config.definitions,
+                                 costs: Afterburner::RamCosts.new(config.costs), port: config.port, log:).render
+  arguments.each do |file|
+    name = File.expand_path(file).delete_prefix("#{Afterburner::Scripts.new(config.src).root}/").sub(/\.rb\z/, ".js")
+    stub = stubs[name] or abort "No stub for #{file}: is it a script under #{config.src}, and has the game connected once?"
+    out.puts stub.content
+  end
+when "version"
+  out.puts Afterburner::VERSION
+else
+  abort parser.help
+end
