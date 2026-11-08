@@ -16,27 +16,25 @@ set "SCRIPTS=src"
 cd /d "%~dp0"
 title afterburner - %CD%
 
-where bundle >nul 2>nul
-if errorlevel 1 goto :no_ruby
-ruby -e "exit(Gem::Version.new(RUBY_VERSION) >= Gem::Version.new('3.4'))" 2>nul
-if errorlevel 1 goto :no_ruby
+where bundle >nul 2>nul || goto :no_ruby
+ruby -e "exit(Gem::Version.new(RUBY_VERSION) >= Gem::Version.new('3.4'))" 2>nul || goto :no_ruby
 
 echo Starting afterburner in %CD% ^(scripts in %SCRIPTS%^)
-call bundle check >nul 2>nul || call bundle install || goto goto :stopped
+call bundle check >nul 2>nul || call bundle install || goto :stopped
+
+rem The TypeScript template: npm run watch, which includes afterburner.
+findstr /c:"\"watch\"" package.json >nul 2>nul || goto :ruby_only
+if not exist node_modules (call npm install || goto :stopped)
+set "AFTERBURNER_SRC=%SCRIPTS%"
+call npm run watch
+goto :stopped
+
+:ruby_only
+call bundle exec afterburner watch --src "%SCRIPTS%"
+goto :stopped
 
 :no_ruby
 echo afterburner needs Ruby 3.4 or newer, with bundler: https://rubyinstaller.org
-
-:stopped
-
-findstr /c:"\"watch\"" package.json >nul 2>nul
-if not errorlevel 1 (
-  if not exist node_modules (call npm install || goto :stopped)
-  set "AFTERBURNER_SRC=%SCRIPTS%"
-  call npm run watch
-) else (
-  call bundle exec afterburner watch --src "%SCRIPTS%"
-)
 
 :stopped
 echo.
