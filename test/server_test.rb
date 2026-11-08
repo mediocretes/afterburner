@@ -551,6 +551,67 @@ class ServerTest < Minitest::Test
     end
   end
 
+  # Opens a console at path, runs its stub claiming granted GB, and leaves.
+  # Returns the console's status messages, its "attached" message, and the
+  # stub the game was sent.
+  def attach_console(path, granted:)
+    statuses = []
+    attached = stub_source = nil
+    serve do
+      game = FakeGame.new(self)
+      game_task = Async { game.run }
+      eventually { game.methods.include?("getAllFiles") }
+      console = Async do
+        connect(path) do |client|
+          until (message = receive(client))["op"] == "attached"
+            statuses << message["message"]
+          end
+          attached = message
+        end
+      end
+      eventually { game.pushed.key?("afterburner/console.js") }
+      stub_source = game.pushed["afterburner/console.js"]
+      connect("/script") do |stub|
+        transmit(stub, op: "start", script: "@console", args: [], pid: 7, ram: granted)
+        assert_equal "exit", receive(stub)["op"]
+      end
+      console.wait
+    ensure
+      game_task&.stop
+    end
+    [statuses, attached, stub_source]
+  end
+
+  def test_the_console_claims_80_percent_of_free_ram_by_default
+    statuses, attached, stub_source = attach_console("/console", granted: 25.6)
+    assert_includes statuses.last, "80% of the free RAM where it runs"
+    assert_includes stub_source, "* 0.8 * 100) / 100"
+    assert_equal 25.6, attached["ram"], "the console hears what the game granted"
+    refute attached["short"]
+  end
+
+  def test_the_console_takes_a_percentage
+    statuses, _attached, stub_source = attach_console("/console?ram=50%25", granted: 16)
+    assert_includes statuses.last, "50% of the free RAM"
+    assert_includes stub_source, "* 0.5 * 100) / 100"
+  end
+
+  def test_the_console_says_when_the_game_granted_less_than_asked
+    _statuses, attached, _stub_source = attach_console("/console?ram=8", granted: 1.75)
+    assert_equal 1.75, attached["ram"]
+    assert attached["short"]
+  end
+
+  def test_the_console_refuses_a_ram_it_cant_read
+    serve do
+      connect("/console?ram=lots") do |client|
+        message = receive(client)
+        assert_equal "error", message["op"]
+        assert_match(/GB.*percentage/, message["message"])
+      end
+    end
+  end
+
   def test_leaving_a_waiting_console_frees_it_for_the_next
     serve do |_dir, log|
       connect("/console?ram=2") { |client| receive(client) } # leave while it waits for the game

@@ -3,6 +3,34 @@
 require "json"
 
 module Afterburner
+  # How much RAM the console's stub claims (`afterburner console --ram`): a
+  # fixed amount in GB, or a percentage of the RAM free on the server it runs
+  # on, which only the game knows when it starts.
+  ConsoleClaim = Data.define(:gb, :percent) do
+    def self.parse(text)
+      text = text.to_s.strip
+      if (percent = text[/\A(\d+(?:\.\d+)?)\s*%\z/, 1])
+        percent = Float(percent)
+        raise ArgumentError, "--ram as a percentage must be more than 0% and at most 100%" unless percent.positive? && percent <= 100
+
+        new(gb: nil, percent:)
+      else
+        gb = Float(text, exception: false) or
+          raise ArgumentError, "--ram must be GB (--ram 8) or a percentage of the free RAM (--ram 80%)"
+        raise ArgumentError, "--ram must be at least #{Api::BASE_RAM} GB" if gb < Api::BASE_RAM
+
+        new(gb:, percent: nil)
+      end
+    end
+
+    def to_s = percent ? "#{number(percent)}% of the free RAM where it runs" : "#{number(gb)} GB"
+
+    private
+
+    def number(value) = value.round(2).to_s.delete_suffix(".0")
+  end
+  ConsoleClaim::DEFAULT = "80%"
+
   # The JavaScript stubs that stand in for Ruby scripts in the game:
   # src/hello.rb becomes hello.js, which claims the RAM the script needs and
   # hands off to afterburner. Stubs never touch the disk; afterburner pushes
@@ -55,7 +83,29 @@ module Afterburner
       JS
     end
 
-    def console_source(ram) = stub_source(CONSOLE_SCRIPT, ram)
+    # The console's stub. A percentage is worked out in the game: the RAM free
+    # on the server, plus what the stub already holds, times the share; never
+    # less than it already holds. Either way it tells afterburner what the game
+    # granted, which is less than asked if the server didn't have it free.
+    def console_source(claim)
+      want = if claim.percent
+               "Math.max(ns.ramOverride(), Math.floor((ns.getServerMaxRam() - ns.getServerUsedRam() + ns.ramOverride()) " \
+                 "* #{claim.percent / 100.0} * 100) / 100)"
+             else
+               claim.gb.to_s
+             end
+      <<~JS
+        #{MARKER} for `afterburner console`. Don't edit it.
+        // RAM: #{claim}
+        import { serve } from "#{PROXY.delete_suffix('.js')}";
+
+        /** @param {NS} ns */
+        export async function main(ns) {
+          const claim = ns.ramOverride(#{want});
+          await serve(ns, #{JSON.generate(CONSOLE_SCRIPT)}, #{@port}, claim);
+        }
+      JS
+    end
 
     # On connect: push the proxy and every stub, and delete stubs left in the
     # game from scripts that are gone.

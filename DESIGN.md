@@ -80,9 +80,12 @@ non-function (`["enums"]`) reads the property. JSON can't carry `Infinity` or `N
 `{"$num": "Infinity"}`. `fail` makes the stub throw, so the game shows its usual error dialog, with the Ruby
 message and backtrace.
 
-**Console** (`/console`): `afterburner console` connects with `?ram=GB`. afterburner pushes
-`afterburner/console.js`, a stub with that claim whose script is the special name `@console`, and sends
-`status` messages until it's run. Then it relays: `call` frames from the console to the stub, `result`/`error`
+**Console** (`/console`): `afterburner console` connects with `?ram=`, GB or a percentage (default `80%`).
+afterburner pushes `afterburner/console.js`, a stub with that claim whose script is the special name `@console`,
+and sends `status` messages until it's run. A percentage is worked out by the stub, since only the game knows
+the server it runs on: `getServerMaxRam() - getServerUsedRam()` plus what it already holds, times the share, and
+never less than it holds (0.1 GB of the claim pays for those two calls). The stub's `start` carries what
+`ramOverride` granted, and the console reports that, saying so when it's less than a GB `--ram` asked for. Then it relays: `call` frames from the console to the stub, `result`/`error`
 back. Leaving the console sends the stub `exit`; the stub stopping sends the console `ended`. On the console
 side, IRB runs on the main thread and the WebSocket in a background thread's reactor, talking through queues.
 

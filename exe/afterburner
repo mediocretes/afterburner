@@ -24,7 +24,7 @@ Warning[:experimental] = false
 Encoding.default_external = Encoding::UTF_8
 
 flags = {}
-console_ram = 4.0
+console_ram = Afterburner::ConsoleClaim::DEFAULT
 dry_run = false
 force = false
 parser = OptionParser.new do |opts|
@@ -48,7 +48,8 @@ parser = OptionParser.new do |opts|
   opts.on("--costs FILE", "RAM costs measured in the game (default: .afterburner/ram-costs.json)") { flags[:costs] = _1 }
   opts.on("--[no-]reload", "watch: restart running scripts when their code changes (default: on)") { flags[:reload] = _1 }
   opts.on("--origin URL", "watch: also accept the game from this origin (repeatable)") { (flags[:origins] ||= []) << _1 }
-  opts.on("--ram GB", Float, "console: RAM to claim (default: 4)") { console_ram = _1 }
+  opts.on("--ram AMOUNT", "console: RAM to claim, in GB (8) or as a share of the free RAM where it runs " \
+                          "(default: #{Afterburner::ConsoleClaim::DEFAULT})") { console_ram = _1 }
   opts.on("--dry-run", "restore: say what would change, change nothing") { dry_run = true }
   opts.on("--force", "restore: take the save's copy even where yours is newer (yours is backed up)") { force = true }
   opts.on("--verbose", "watch: log every message to and from running scripts") { flags[:verbose] = true }

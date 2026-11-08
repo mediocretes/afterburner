@@ -6,6 +6,7 @@ require "async/websocket/client"
 require "json"
 require "logger"
 require "protocol/websocket/message"
+require "uri"
 
 module Afterburner
   # `afterburner console`: IRB on your machine, with `ns` live in the game.
@@ -13,7 +14,8 @@ module Afterburner
   # afterburner pushes a console stub that claims the RAM you ask for, you run
   # it in the game, and from then on each ns call you type goes to it. The
   # game charges each new function you call against that claim, and stops the
-  # stub if you go over; ask for more with --ram.
+  # stub if you go over. By default the stub claims 80% of the RAM free where
+  # it runs; --ram sets GB or another percentage.
   class Console
     # Loaded to make the prompt's binding; see prompt_binding.
     PROMPT = File.expand_path("console_prompt.rb", __dir__)
@@ -93,7 +95,7 @@ module Afterburner
       @requests = Thread::Queue.new
       @replies = Thread::Queue.new
       @events = Thread::Queue.new
-      endpoint = Async::HTTP::Endpoint.parse("http://localhost:#{@port}/console?ram=#{@ram}")
+      endpoint = Async::HTTP::Endpoint.parse("http://localhost:#{@port}/console?#{URI.encode_www_form(ram: @ram)}")
       @thread = Thread.new do
         Sync do |task|
           Async::WebSocket::Client.connect(endpoint) do |connection|
@@ -142,6 +144,7 @@ module Afterburner
         when "attached"
           @pid = event["pid"]
           @out.puts("Attached to pid #{@pid}, with #{event['ram']} GB claimed. `ns` is live; `exit` to leave.")
+          @out.puts("That's less than --ram asked for: the server didn't have it free.") if event["short"]
           return true
         else
           @out.puts(event["message"])
