@@ -587,7 +587,6 @@ class ServerTest < Minitest::Test
     assert_includes statuses.last, "80% of the free RAM where it runs"
     assert_includes stub_source, "* 0.8 * 100) / 100"
     assert_equal 25.6, attached["ram"], "the console hears what the game granted"
-    refute attached["short"]
   end
 
   def test_the_console_takes_a_percentage
@@ -596,10 +595,11 @@ class ServerTest < Minitest::Test
     assert_includes stub_source, "* 0.5 * 100) / 100"
   end
 
-  def test_the_console_says_when_the_game_granted_less_than_asked
-    _statuses, attached, _stub_source = attach_console("/console?ram=8", granted: 1.75)
-    assert_equal 1.75, attached["ram"]
-    assert attached["short"]
+  def test_the_console_takes_gb
+    statuses, attached, stub_source = attach_console("/console?ram=8", granted: 8.0)
+    assert_includes statuses.last, "it claims 8 GB"
+    assert_includes stub_source, "ns.ramOverride(8.0);"
+    assert_equal 8.0, attached["ram"]
   end
 
   def test_the_console_refuses_a_ram_it_cant_read

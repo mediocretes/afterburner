@@ -27,6 +27,6 @@ First version.
 - The console's prompt is a script's top level, so code behaves there as it would in a script. afterburner's
   own classes no longer show through: `Server` at the prompt was afterburner's Remote API server.
 - The console claims 80% of the RAM free on the server you run it on, worked out in the game when it starts;
-  `--ram` takes a percentage or GB. It says what the game granted, including when that's less than asked.
+  `--ram` takes a percentage or GB, and the console says how much it got.
 - Records have `keys`, the snake_case field names, and their `methods` include the field readers, so
   `server.<Tab>` completes fields in the console.
