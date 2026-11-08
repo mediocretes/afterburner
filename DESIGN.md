@@ -109,8 +109,9 @@ the RAM scanner both use it, so anything a script can call is something it's cha
   finds the API through the same fiber-local session as `ns`. Docs come from the definitions file: the parser
   keeps each member's JSDoc and signature, and `AB::Docs` renders them with Ruby names. An options object as the
   last parameter shows as `**opts` with its fields listed as keywords.
-- `Record` wraps game objects: snake_case readers, `?` predicates (dropping `has`/`is`), `[]`, `to_h`, pattern
-  matching. Sent back to the game as the original object.
+- `Record` wraps game objects: snake_case readers, `?` predicates (dropping `has`/`is`), `[]`, `keys`, `to_h`,
+  pattern matching. `methods` adds the readers (and predicates for yes/no fields) so IRB completes them. Sent
+  back to the game as the original object.
 - Each run is `load(path, fresh_module)`, so scripts' constants and methods don't leak into each other. The
   module provides `ARGV`, `NetscriptError`, and per-script `at_exit`, `abort`, `exit`.
 - `ns` and `logger` are private `Kernel` methods (`ScriptAccess`) that look up the running script's session in

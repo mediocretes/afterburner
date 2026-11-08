@@ -105,6 +105,7 @@ server = ns.server("n00dles")
 server.money_max          # moneyMax
 server.admin_rights?      # hasAdminRights
 server[:money_max]        # same thing
+server.keys               # [:hostname, :ip, ..., :money_max, ...]; in the console, server.<Tab> completes them
 server.to_h               # { hostname: "n00dles", money_max: 1750000, ... }
 
 case server
