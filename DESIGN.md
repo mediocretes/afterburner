@@ -3,7 +3,7 @@
 This is the design document: enough to pick the project up cold. The README covers using it.
 
 Status: 0.1.0, a working prototype. Verified end to end against the live web game (v3.0.1) in a headless
-browser (`rake e2e`, 13 checks). Not yet tried in the Steam build or on Windows.
+browser (`rake e2e`, 14 checks). Not yet tried in the Steam build or on Windows.
 
 ## The shape of it
 
@@ -62,7 +62,7 @@ bitburner-src `src/RemoteFileAPI/MessageHandlers.ts`.
 **Scripts** (afterburner's own, on `/script`), JSON text frames, one socket per running script:
 
 ```
-stub → afterburner  {op: "start", script: "scout.rb", args: [...], pid: 3}
+stub → afterburner  {op: "start", script: "scout.rb", args: [...], pid: 3, ram: 2.25}
 afterburner → stub  {op: "costs", names: [...]}         (at most once a minute; see RAM)
 stub → afterburner  {op: "costs", costs: {"hack": 0.1, ...}}
 afterburner → stub  {op: "call", id: 1, path: ["hacknet", "numNodes"], args: [...]}
@@ -70,7 +70,8 @@ stub → afterburner  {op: "result", id: 1, value: ...} | {op: "error", id: 1, m
 afterburner → stub  {op: "exit"} | {op: "fail", message: "..."}
 ```
 
-A script makes one call at a time, so the game never sees concurrent `ns` calls from it. A `path` naming a
+`ram` is what the stub claimed, for hot reload. A script makes one call at a time, so the game never sees
+concurrent `ns` calls from it. A `path` naming a
 non-function (`["enums"]`) reads the property. JSON can't carry `Infinity` or `NaN`, so both sides tag them as
 `{"$num": "Infinity"}`. `fail` makes the stub throw, so the game shows its usual error dialog, with the Ruby
 message and backtrace.
@@ -106,6 +107,28 @@ the RAM scanner both use it, so anything a script can call is something it's cha
   gems too. `logger` writes to `ns.print`.
 - `at_exit` blocks run before the game hears a script is done, so they can still use `ns`. After a kill they
   run too, but `ns` calls in them raise rather than wait for an answer that won't come.
+
+## Hot reload
+
+The server's tick compares the mtimes of every `.rb` under `src/`. When a file changes, each running Session
+whose files (its script plus whatever it `require_relative`s, from the RAM scan) include it is asked to reload:
+
+1. Changed libraries that are loaded are required again first (deleted from `$LOADED_FEATURES`, then
+   `require`d). Not `load`: a plain `load` evaluates under the thread's current top-level wrapper, and that
+   state is per thread, not per fiber, so while any script sits paused inside its own wrapped `load`, a
+   library re-`load`ed from the server lands inside that script's anonymous module. `require` always
+   evaluates at the real top level.
+2. `Session#reload` rescans the script and checks the RAM. The game charges each distinct function once per
+   process, so what the new code needs is the base cost plus everything the session has called so far plus
+   everything the new code calls. If that exceeds the stub's claim (`ram` from `start`), the old code keeps
+   running and the log says to run it again (the stub itself has already been re-pushed with the new figure).
+3. Otherwise the script's task is stopped and a new run starts in the same session: same stub, pid, socket,
+   and arguments, a fresh module. It first runs the old code's `at_exit` blocks (`ns` still works), then
+   prints `afterburner: reloaded` to the script's log.
+
+A call the old code had in flight still completes in the game (the stub handles one message at a time); its
+late answer is recognised by its id and dropped. A reload can only start while the script is running, and a
+run restarts only if a reload actually stopped it, so a script that has just finished isn't brought back.
 
 ## RAM
 
@@ -152,7 +175,8 @@ It is not a sandbox for the Ruby you write.
 | `lib/afterburner/game_link.rb` | the game's Remote API connection |
 | `lib/afterburner/file_sync.rb` | syncing other files |
 | `lib/afterburner/stubs.rb` | building and pushing stubs |
-| `lib/afterburner/session.rb` | one running script; script context; output routing |
+| `lib/afterburner/session.rb` | one running script, its protocol, hot reload |
+| `lib/afterburner/script_context.rb` | what a script sees at top level; routing `puts` to the game |
 | `lib/afterburner/console.rb` | the IRB side of `afterburner console` |
 | `lib/afterburner/api.rb` | definitions parser, name resolution, documented costs |
 | `lib/afterburner/ns.rb` | the `ns` proxy, `NetscriptError` |
@@ -178,23 +202,37 @@ It is not a sandbox for the Ruby you write.
 
 - Scripts are fibers on one thread: Ruby that never yields (no `ns` call, `sleep`, or IO) blocks every script,
   and a kill can't interrupt it.
-- `require_relative`'d libraries load once per process.
 - `ps` shows `scout.js`, not `scout.rb`.
 - Port handles and React-node printers don't cross.
 - Reloading the game drops every script's socket.
 - One socket per running script.
 
+## Keeping it working
+
+What's most likely to break, and what watches for it:
+
+- **The definitions format.** The parser reads `NetscriptDefinitions.d.ts` line by line, relying on its
+  generated formatting. The `Upstream definitions` workflow parses the game's current `stable` and `dev`
+  copies weekly, and `afterburner watch` warns if a connected game's file yields suspiciously few functions.
+- **The game's UI**, for the end-to-end test only: it clicks "Exit Tutorial", "Options", "Remote API", the
+  second text field (the port), and "Connect".
+- **async's internals.** Stopping a task raises `Async::Cancel` in async 2.46 (`Async::Stop` before); the
+  code rescues whichever of those exist (`Afterburner::STOPPED`). The server binds its port up front, so a
+  busy port is an error message rather than a quiet failure in a background task.
+- **The game's error text.** `NetscriptError.from_game` strips the "RUNTIME ERROR … (PID - n)" header, and
+  the proxy's RAM hint looks for "RAM USAGE ERROR"; if either wording changes, you just get the raw message.
+- **Steam's origin**, unverified: `--origin` accepts another one without a code change.
+
+`--verbose` logs every message between afterburner and running scripts.
+
 ## Next steps
 
-- **Hot reload**: when a running script's `.rb` changes and its RAM claim still covers it, restart it inside the
-  same stub (same pid, no game involvement): the Rails dev-mode feel. Deferred, not rejected.
 - **A fork of the game** (bitburner-src), if `.rb` should be first-class: teach the module loader to accept
   `.rb` and synthesise the stub, so `ps`/`run` show `.rb` and no stubs exist. RAM could come from afterburner at
   load time. Costs: permanent rebasing, and saves holding `.rb` files won't load in the stock game. Touch
   points: `src/utils/ScriptTransformer.ts`, `src/Script/RamCalculations.ts`, `src/Paths/ScriptFilePath.ts`,
   `src/RemoteFileAPI/MessageHandlers.ts`.
 - **Two-way sync**, using `getAllFiles` and file metadata, for scripts edited in the in-game editor.
-- **Library reloading** without a restart.
 - **Multiplexing** scripts over one socket, if Ruby scripts ever run in the hundreds.
 - **`autocomplete`** in stubs, for tab completion.
 - A Ruby-shaped object layer over `ns` (`ns.servers["n00dles"].hack`) is deliberately left to users: it encodes

@@ -76,6 +76,26 @@ class ApiTest < Minitest::Test
     refute_includes names, "args"
   end
 
+  def test_ram_for_counts_each_function_once
+    assert_in_delta 1.8, api.ram_for(%w[hack getServerMaxMoney hack])
+    assert_in_delta 1.6, api.ram_for(%w[tprint not.a.function])
+  end
+
+  def test_generic_and_declared_interfaces
+    definitions = <<~TS
+      interface Base<T> {
+        /**
+         * RAM cost: 1 GB
+         */
+        inherited(): T;
+      }
+      export declare interface NS extends Base<number> {
+        readonly args: ScriptArg[];
+      }
+    TS
+    assert_equal ["inherited"], Afterburner::Api.new(definitions).resolve([], "inherited").path
+  end
+
   def test_name_conversions
     assert_equal "get_server_max_money", Afterburner::Api.underscore("getServerMaxMoney")
     assert_equal "additionalMsec", Afterburner::Api.camelize(:additional_msec)

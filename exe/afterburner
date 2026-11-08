@@ -38,17 +38,24 @@ parser = OptionParser.new do |opts|
   opts.on("--dist DIR", "Other files to sync to the game (default: filesync.json's scriptsFolder)") { flags[:dist] = _1 }
   opts.on("--definitions FILE", "Where to keep the game's NetscriptDefinitions.d.ts") { flags[:definitions] = _1 }
   opts.on("--costs FILE", "RAM costs measured in the game (default: .afterburner/ram-costs.json)") { flags[:costs] = _1 }
+  opts.on("--[no-]reload", "watch: restart running scripts when their code changes (default: on)") { flags[:reload] = _1 }
+  opts.on("--origin URL", "watch: also accept the game from this origin (repeatable)") { (flags[:origins] ||= []) << _1 }
   opts.on("--ram GB", Float, "console: RAM to claim (default: 4)") { console_ram = _1 }
+  opts.on("--verbose", "watch: log every message to and from running scripts") { flags[:verbose] = true }
   opts.on("-v", "--version", "Print the version") do
     puts Afterburner::VERSION
     exit
   end
 end
-command, *arguments = parser.parse(ARGV)
-config = Afterburner::Config.load(**flags)
+begin
+  command, *arguments = parser.parse(ARGV)
+  config = Afterburner::Config.load(**flags.except(:verbose))
+rescue OptionParser::ParseError, Afterburner::ConfigError => e
+  abort "afterburner: #{e.message}"
+end
 out = STDOUT
 out.sync = true
-log = Logger.new(out, formatter: lambda { |severity, time, _program, message|
+log = Logger.new(out, level: flags[:verbose] ? Logger::DEBUG : Logger::INFO, formatter: lambda { |severity, time, _program, message|
   "#{time.strftime('%H:%M:%S')} #{'warning: ' if severity == 'WARN'}#{message}\n"
 })
 
@@ -65,6 +72,8 @@ when "watch"
   $stderr = Afterburner::ScriptOutput.new(STDERR)
   begin
     Sync { Afterburner::Server.new(config, log:).run }
+  rescue Afterburner::PortInUse => e
+    abort "afterburner: #{e.message}"
   rescue Interrupt
     out.puts
   end

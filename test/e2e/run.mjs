@@ -21,9 +21,10 @@ const GAME_URL = process.env.GAME_URL ?? "https://bitburner-official.github.io/"
 const PORT = 12536;
 const WORK = fs.mkdtempSync(path.join(os.tmpdir(), "afterburner-e2e-"));
 const DIST = path.join(WORK, "dist");
+const SRC = path.join(WORK, "src"); // a copy of the fixtures, so the test can edit them
 const DEFINITIONS = path.join(WORK, "NetscriptDefinitions.d.ts");
 const COSTS = path.join(WORK, "ram-costs.json");
-const FLAGS = ["--port", String(PORT), "--src", FIXTURES, "--dist", DIST, "--definitions", DEFINITIONS, "--costs", COSTS];
+const FLAGS = ["--port", String(PORT), "--src", SRC, "--dist", DIST, "--definitions", DEFINITIONS, "--costs", COSTS];
 
 const results = [];
 const watchLog = [];
@@ -60,6 +61,7 @@ const logged = (pattern) => watchLog.find((line) => pattern.test(line));
 function startWatching() {
   step(`starting afterburner watch on ${PORT}`);
   fs.cpSync(path.join(ROOT, "test/e2e/dist"), DIST, { recursive: true });
+  fs.cpSync(FIXTURES, SRC, { recursive: true });
   watcher = spawn("bundle", ["exec", "exe/afterburner", "watch", ...FLAGS], { cwd: ROOT });
   const collect = (chunk) => {
     for (const line of String(chunk).split("\n").filter(Boolean)) {
@@ -98,6 +100,7 @@ async function terminal(page, command) {
 }
 
 async function closeModals(page) {
+  await page.keyboard.press("Escape"); // e.g. the dialog `cat` opens
   for (const button of await page.getByRole("button", { name: "Close", exact: true }).all()) await button.click({ timeout: 1000 }).catch(() => {});
 }
 
@@ -129,7 +132,7 @@ async function gameRam(file) {
 }
 
 async function localRam(file) {
-  const { output } = await afterburner(["ram", path.join(FIXTURES, file)]).done;
+  const { output } = await afterburner(["ram", path.join(SRC, file)]).done;
   return Number(/: ([\d.]+) GB/.exec(output)[1]);
 }
 
@@ -234,6 +237,25 @@ async function main() {
     const ram = await waitUntil(async () => ((await gameRam("clear.js")) === 1.6 ? 1.6 : null), 10000, "clear.js to claim 1.6 GB");
     await expectOutput(page, "run clear.js", /cleared/);
     return `clear.js now claims ${ram} GB, from 1.8`;
+  });
+
+  await check("hot reload: an edited script restarts in place, if its RAM claim covers it", async () => {
+    const script = path.join(SRC, "reloadme.rb");
+    await expectOutput(page, "run reloadme.js", /reloadme says v1/);
+    const started = await waitUntil(() => logged(/\[reloadme\.rb pid (\d+)\] started/), 5000, "reloadme.rb to start");
+    const pid = /pid (\d+)/.exec(started)[1];
+
+    fs.writeFileSync(script, fs.readFileSync(script, "utf8").replace("v1", "v2"));
+    await waitUntil(async () => (await screen(page)).includes("reloadme says v2"), 5000, "the new code to run");
+    if (!logged(new RegExp(`\\[reloadme\\.rb pid ${pid}\\] reloaded`))) throw new Error(`no reload logged for pid ${pid}`);
+
+    // ns.get_server costs 2 GB the stub never claimed, so this edit waits for a rerun.
+    fs.writeFileSync(script, fs.readFileSync(script, "utf8").replace("v2", "v3").replace("loop", 'ns.get_server("home")\nloop'));
+    await waitUntil(() => logged(/reloadme\.rb pid \d+\] changed, but now needs/), 5000, "the reload to be refused");
+    await new Promise((r) => setTimeout(r, 1000));
+    if ((await screen(page)).includes("reloadme says v3")) throw new Error("the 2 GB edit ran anyway");
+    await terminal(page, "kill reloadme.js");
+    return `pid ${pid} went from v1 to v2 in place; the 2 GB edit waits for a rerun`;
   });
 
   await check("afterburner save downloads the live save", async () => {

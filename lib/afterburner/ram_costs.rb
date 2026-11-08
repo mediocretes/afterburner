@@ -22,10 +22,15 @@ module Afterburner
       @checked_at = nil
     end
 
+    # The cached costs; re-read only when the file changes.
     def load
-      File.exist?(@path) ? JSON.parse(File.read(@path)) : {}
+      mtime = File.exist?(@path) ? File.mtime(@path) : nil
+      return @loaded if mtime == @loaded_mtime && @loaded
+
+      @loaded_mtime = mtime
+      @loaded = mtime ? JSON.parse(File.read(@path)) : {}
     rescue JSON::ParserError
-      {}
+      @loaded = {}
     end
 
     # True at most once per REFRESH_SECONDS; the caller is expected to measure.

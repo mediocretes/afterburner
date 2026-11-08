@@ -4,45 +4,59 @@ require "async"
 require "async/queue"
 require "json"
 require "logger"
-require "stringio"
+require "set"
 require "protocol/websocket/message"
 
 module Afterburner
-  # The daemon refused to run a script: no such file, or a name it won't load.
+  # The server refused to run a script: no such file, or a name it won't load.
   class ScriptNotFound < StandardError; end
 
   # abort("message") in a script: ends it, showing the message as its error.
   class ScriptAbort < StandardError; end
 
+  # What Async raises in a task it's stopping. Named by whichever constants
+  # this version of async has, so a rename there can't break a rescue here.
+  STOPPED = %i[Stop Cancel].filter_map { Async.const_get(_1) if Async.const_defined?(_1) }.freeze
+
   # One running Ruby script, tied to one in-game stub over one WebSocket.
   #
   # The protocol, all JSON text frames:
   #
-  #   game → daemon  {op: "start", script: "hello.rb", args: [...], pid: 3}
-  #   daemon → game  {op: "call", id: 1, path: ["hacknet", "numNodes"], args: [...]}
-  #   game → daemon  {op: "result", id: 1, value: ...}  or  {op: "error", id: 1, message: "..."}
-  #   daemon → game  {op: "exit"}  or  {op: "fail", message: "..."}
+  #   stub → server  {op: "start", script: "hello.rb", args: [...], pid: 3, ram: 1.7}
+  #   server → stub  {op: "call", id: 1, path: ["hacknet", "numNodes"], args: [...]}
+  #   stub → server  {op: "result", id: 1, value: ...}  or  {op: "error", id: 1, message: "..."}
+  #   server → stub  {op: "exit"}  or  {op: "fail", message: "..."}
   #
-  # Before the script runs, the daemon may ask for the game's RAM costs:
+  # Before the script runs, the server may ask for the game's RAM costs:
   #
-  #   daemon → game  {op: "costs", names: ["hack", "hacknet.numNodes", ...]}
-  #   game → daemon  {op: "costs", costs: {"hack": 0.1, ...}}
+  #   server → stub  {op: "costs", names: ["hack", "hacknet.numNodes", ...]}
+  #   stub → server  {op: "costs", costs: {"hack": 0.1, ...}}
   #
   # A script makes one call at a time, so the game never sees concurrent ns
   # calls from it. When the game kills the stub, the stub closes the socket and
   # the script is stopped wherever it is.
+  #
+  # Hot reload: when one of the script's files changes, #reload restarts it
+  # inside the same stub (same pid, same arguments), provided the stub's RAM
+  # claim covers everything the script has called so far plus the new code.
+  # The game charges each distinct function once per process, so functions
+  # the old code called still count.
   class Session
-    attr_reader :script, :pid, :args, :ns, :logger
+    attr_reader :script, :pid, :args, :ns, :logger, :files
 
-    def initialize(connection, api:, scripts:, log:, costs: nil)
+    def initialize(connection, api:, scripts:, log:, costs: nil, ram_api: nil)
       @connection = connection
       @api = api
       @scripts = scripts
       @log = log
       @costs = costs
+      @ram_api = ram_api || api
       @next_id = 0
       @exit_hooks = []
       @terminal_buffer = +""
+      @called = Set.new
+      @files = []
+      @runs = 0
     end
 
     # start: the stub's first message, which the server has already read.
@@ -52,26 +66,51 @@ module Afterburner
       @script = start["script"].to_s
       @pid = start["pid"]
       @args = Codec.decode(start["args"] || []).freeze
-      path = @scripts.resolve(@script)
+      @claim = start["ram"]
+      @path = @scripts.resolve(@script)
+      @files = RamScanner.new(@ram_api).scan(@path).files
       measure_costs if @costs&.due?
       @ns = NS.new(self, @api)
       @logger = script_logger
 
       @inbox = Async::Queue.new
-      runner = Async { execute(path) }
       reader = Async do
         while (message = receive)
           @inbox.push(message)
         end
         # The stub hung up: the game killed the script, or the game went away.
         @hung_up = true
-        runner.stop
+        @runner&.stop
       end
-      runner.wait
+      loop do
+        @reloading = @restart = false
+        @runner = Async { execute }
+        @runner.wait
+        break unless @restart && !@hung_up
+
+        @runs += 1
+      end
     rescue ScriptNotFound => e
       refuse(e.message)
     ensure
       reader&.stop
+    end
+
+    # One of this script's files changed. Restarts it in place if the stub's
+    # RAM claim still covers it; otherwise says why not and leaves it running.
+    def reload(ram_api)
+      return if @runner.nil? || !@runner.alive? || @hung_up || @reloading
+
+      scan = RamScanner.new(ram_api).scan(@path)
+      needed = ram_api.ram_for(@called.to_a + scan.charges.map(&:name))
+      if @claim.nil? || needed > @claim + 1e-9
+        @log.warn("[#{label}] changed, but now needs #{needed} GB and its stub claimed #{@claim || '?'} GB; " \
+                  "run it again to pick up the change")
+        return
+      end
+      @files = scan.files
+      @reloading = true
+      @runner.stop
     end
 
     # ns.something(...) from the script: ask the game, wait for its answer.
@@ -79,9 +118,11 @@ module Afterburner
       raise NetscriptError, "the game has already stopped #{@script}" if @hung_up
 
       id = (@next_id += 1)
+      @called << path.join(".")
       deliver(op: "call", id:, path:, args: Codec.encode(args))
-      reply = @inbox.pop
-      raise "reply #{reply['id']} doesn't match call #{id}" unless reply["id"] == id
+      reply = nil
+      # Answers to calls a reload interrupted arrive late; they're dropped here.
+      reply = @inbox.pop until reply && reply["id"] == id
       raise NetscriptError.from_game(reply["message"]) if reply["op"] == "error"
 
       Codec.decode(reply["value"])
@@ -123,11 +164,19 @@ module Afterburner
     end
 
     # at_exit blocks run before the game hears the script is done, so they can
-    # still use ns. After a kill they run too, but ns calls in them raise.
-    def execute(path)
+    # still use ns. After a kill they run too, but ns calls in them raise. A
+    # reload runs the old code's blocks at the start of the new run, once ns
+    # works again.
+    def execute
       Fiber[:afterburner_session] = self
-      @log.info("[#{label}] started#{" with #{@args.inspect}" unless @args.empty?}")
-      failure = run_script(path)
+      if @runs.zero?
+        @log.info("[#{label}] started#{" with #{@args.inspect}" unless @args.empty?}")
+      else
+        run_exit_hooks
+        @log.info("[#{label}] reloaded")
+        call(["print"], ["afterburner: reloaded #{@script}"])
+      end
+      failure = run_script
       run_exit_hooks
       flush_terminal
       if failure
@@ -137,7 +186,9 @@ module Afterburner
         @log.info("[#{label}] finished")
         deliver(op: "exit")
       end
-    rescue Async::Stop, Async::Cancel
+    rescue *STOPPED
+      return @restart = true if @reloading && !@hung_up # the next run takes over
+
       @log.info("[#{label}] killed in the game")
       @hung_up = true
       run_exit_hooks
@@ -145,12 +196,12 @@ module Afterburner
     end
 
     # Runs the script; returns its failure message, or nil if it ended normally.
-    def run_script(path)
-      load(path, ScriptContext.build(self))
+    def run_script
+      load(@path, ScriptContext.build(self))
       nil
     rescue SystemExit
       nil
-    rescue Async::Stop, Async::Cancel
+    rescue *STOPPED
       raise
     rescue ScriptAbort => e
       e.message
@@ -175,29 +226,44 @@ module Afterburner
       @exit_hooks = []
       hooks.reverse_each do |hook|
         hook.call
+      rescue *STOPPED
+        raise
       rescue Exception => e # rubocop:disable Lint/RescueException
         @log.warn("[#{label}] at_exit hook raised #{e.class}: #{e.message}")
       end
     end
 
     # "boom (RuntimeError)" plus the backtrace through the script's own files,
-    # the way Ruby prints an uncaught exception.
+    # the way Ruby prints an uncaught exception. If none of the frames are the
+    # script's (the error came from a gem, say), the first few of any.
     def describe(error)
       root = "#{@scripts.root}/"
-      frames = (error.backtrace || []).filter_map { _1.delete_prefix(root) if _1.start_with?(root) }
+      trace = error.backtrace || []
+      frames = trace.filter_map { _1.delete_prefix(root) if _1.start_with?(root) }
+      frames = trace.first(3) if frames.empty?
       ["#{error.message} (#{error.class})", *frames.map { "\tfrom #{_1}" }].join("\n")
     end
 
     def deliver(message)
+      @log.debug { "[#{label}] → #{JSON.generate(message)[0, 200]}" }
       Protocol::WebSocket::TextMessage.generate(message).send(@connection)
       @connection.flush
     rescue StandardError
       nil # the game already hung up
     end
 
+    # The next message, or nil once the connection closes. A frame that isn't
+    # JSON is skipped rather than taken for a hang-up.
     def receive
-      message = @connection.read or return nil
-      JSON.parse(message.to_str)
+      loop do
+        message = @connection.read or return nil
+        @log.debug { "[#{label}] ← #{message.to_str[0, 200]}" }
+        return JSON.parse(message.to_str)
+      rescue JSON::ParserError
+        @log.warn("[#{label}] ignored a message that wasn't JSON")
+      end
+    rescue *STOPPED
+      raise
     rescue StandardError
       nil
     end
@@ -213,68 +279,6 @@ module Afterburner
         text = message.is_a?(Exception) ? "#{message.message} (#{message.class})" : message.to_s
         severity == "INFO" ? "#{text}\n" : "#{severity}: #{text}\n"
       })
-    end
-  end
-
-  # The top-level context a script runs in. Each run gets a fresh module, so
-  # constants and methods a script defines don't leak into other scripts.
-  module ScriptContext
-    def self.build(session)
-      ns = session.ns
-      logger = session.logger
-      Module.new do
-        const_set(:ARGV, session.args.dup.freeze)
-        const_set(:NetscriptError, Afterburner::NetscriptError)
-        define_method(:ns) { ns }
-        define_method(:logger) { logger }
-        define_method(:at_exit) { |&block| session.at_exit(&block) }
-        define_method(:abort) { |message = "aborted"| raise ScriptAbort, message }
-        define_method(:exit!) { |*| raise SystemExit }
-      end
-    end
-  end
-
-  # Stands in for $stdout and $stderr in the daemon. Writes from inside a
-  # script go to that script's terminal output in the game; writes from
-  # anywhere else go to the real stream. So puts, print, p, and warn all work
-  # in scripts, including inside classes and gems they call.
-  class ScriptOutput
-    def initialize(real)
-      @real = real
-    end
-
-    def write(*strings)
-      session = Fiber[:afterburner_session]
-      session ? session.terminal_write(strings.join) : @real.write(*strings)
-    end
-
-    def puts(*objects) = write(render { _1.puts(*objects) }) && nil
-    def print(*objects) = write(render { _1.print(*objects) }) && nil
-    def printf(*args) = write(format(*args)) && nil
-
-    def <<(object)
-      write(object.to_s)
-      self
-    end
-
-    def flush
-      @real.flush unless Fiber[:afterburner_session]
-      self
-    end
-
-    def sync = true
-    def sync=(_value); end
-    def tty? = Fiber[:afterburner_session] ? false : @real.tty?
-    alias isatty tty?
-    def fileno = @real.fileno
-    def external_encoding = @real.external_encoding
-
-    private
-
-    def render
-      io = StringIO.new
-      yield io
-      io.string
     end
   end
 end

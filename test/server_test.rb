@@ -15,13 +15,13 @@ class ServerTest < Minitest::Test
   Played = Data.define(:final, :calls, :log)
 
   # A project directory and a running server for it. Yields [dir, log].
-  def serve(files: {}, filesync: nil, definitions: true)
+  def serve(files: {}, filesync: nil, definitions: true, **flags)
     Dir.mktmpdir do |dir|
       files.each { |name, text| write(dir, name, text) }
       File.write(File.join(dir, "NetscriptDefinitions.d.ts"), FIXTURE_DEFINITIONS) if definitions
       File.write(File.join(dir, "filesync.json"), JSON.generate(filesync)) if filesync
       log = StringIO.new
-      config = Afterburner::Config.load(dir, port: PORT)
+      config = Afterburner::Config.load(dir, port: PORT, **flags)
       server = Afterburner::Server.new(config, log: quiet_log(log))
       with_script_output do
         Sync do |task|
@@ -237,6 +237,31 @@ class ServerTest < Minitest::Test
     assert_equal [["tprint", ["nil"]], ["tprint", ["false"]]], play("puts defined?(LIMIT).inspect\nputs respond_to?(:helper, true).inspect").calls
   end
 
+  # Scripts are fibers on one thread, and Ruby keeps some load state per
+  # thread; two scripts paused mid-run mustn't see each other's definitions.
+  def test_scripts_running_at_once_keep_their_own_constants_and_methods
+    script = ->(tag) { "LIMIT = '#{tag}'\ndef who = '#{tag}'\n3.times { ns.sleep(1) }\nputs \"\#{LIMIT} \#{who}\"" }
+    printed = Hash.new { |h, k| h[k] = [] }
+    serve(files: { "src/a.rb" => script.("a"), "src/b.rb" => script.("b") }) do
+      %w[a b].map do |name|
+        Async do
+          connect("/script") do |connection|
+            transmit(connection, op: "start", script: "#{name}.rb", args: [], pid: name.ord, ram: 1.6)
+            while (message = receive(connection))
+              break unless message["op"] == "call" || message["op"] == "costs"
+              next transmit(connection, op: "costs", costs: {}) if message["op"] == "costs"
+
+              printed[name] << message["args"].first if message["path"] == ["tprint"]
+              sleep 0.01 # let the other script run in between
+              transmit(connection, op: "result", id: message["id"], value: nil)
+            end
+          end
+        end
+      end.each(&:wait)
+    end
+    assert_equal({ "a" => ["a a"], "b" => ["b b"] }, printed)
+  end
+
   def test_refuses_names_outside_the_scripts_or_in_lib
     ["../outside.rb", "/etc/passwd", "lib/helper.rb", "missing.rb"].each do |name|
       played = play("puts 1", files: { "lib/helper.rb" => "" }, start: { op: "start", script: name, args: [], pid: 1 })
@@ -249,6 +274,84 @@ class ServerTest < Minitest::Test
     assert_equal "exit", play("puts 1", origin: "https://bitburner-official.github.io").final["op"]
   end
 
+  # -- Hot reload ------------------------------------------------------------
+
+  # Runs a looping script with the given RAM claim, swaps in new code once it's
+  # going, and plays on until done.(calls, log) or a few seconds pass.
+  def play_reload(source, new_source, ram:, files: {}, edit: "src/script.rb", done:, **flags)
+    result = nil
+    serve(files: { "src/script.rb" => source, **files }, **flags) do |dir, log|
+      calls = []
+      edited = false
+      deadline = Time.now + 5
+      connect("/script") do |connection|
+        transmit(connection, op: "start", script: "script.rb", args: [], pid: 7, ram:)
+        while (message = receive(connection))
+          case message["op"]
+          when "costs" then transmit(connection, op: "costs", costs: {})
+          when "call"
+            calls << [message["path"].join("."), message["args"]]
+            if !edited && calls.size >= 3
+              write(dir, edit, new_source)
+              File.utime(Time.now + 5, Time.now + 5, File.join(dir, edit))
+              edited = true
+            end
+            break if done.call(calls, log.string) || Time.now > deadline
+
+            sleep 0.01
+            transmit(connection, op: "result", id: message["id"], value: nil)
+          else break
+          end
+        end
+      end
+      result = [calls, log.string]
+    end
+    result
+  end
+
+  def test_a_changed_script_restarts_in_place
+    calls, log = play_reload("loop { ns.print('v1'); ns.sleep(1) }", "loop { ns.print('v2'); ns.sleep(1) }",
+                             ram: 1.6, done: ->(calls, _) { calls.include?(["print", ["v2"]]) })
+    assert_includes calls, ["print", ["v2"]]
+    assert_includes calls, ["print", ["afterburner: reloaded script.rb"]]
+    assert_includes log, "[script.rb pid 7] reloaded"
+  end
+
+  def test_the_old_codes_at_exit_runs_first_with_ns_working
+    calls, = play_reload("at_exit { ns.print('old exit') }\nloop { ns.print('v1'); ns.sleep(1) }",
+                         "loop { ns.print('v2'); ns.sleep(1) }", ram: 1.6, done: ->(calls, _) { calls.include?(["print", ["v2"]]) })
+    assert_operator calls.index(["print", ["old exit"]]), :<, calls.index(["print", ["afterburner: reloaded script.rb"]])
+  end
+
+  def test_a_change_needing_more_ram_than_the_stub_claimed_waits_for_a_rerun
+    calls, log = play_reload("loop { ns.print('v1'); ns.sleep(1) }", "loop { ns.hack('x'); ns.sleep(1) }",
+                             ram: 1.6, done: ->(_, log) { log.include?("now needs") })
+    assert_includes log, "now needs 1.7 GB and its stub claimed 1.6 GB"
+    refute_includes calls.map(&:first), "hack"
+  end
+
+  def test_what_the_old_code_called_still_counts
+    _, log = play_reload("loop { ns.hack('x'); ns.sleep(1) }", "loop { ns.hacking_level; ns.sleep(1) }",
+                         ram: 1.7, done: ->(_, log) { log.include?("now needs") })
+    assert_includes log, "now needs 1.75 GB"
+  end
+
+  def test_changing_a_library_reloads_scripts_that_use_it
+    library = "module ReloadTestHelper\n  def self.tag = 'v1'\nend\n"
+    calls, log = play_reload("require_relative 'lib/helper'\nloop { ns.print(ReloadTestHelper.tag); ns.sleep(1) }",
+                             library.sub("v1", "v2"), ram: 1.6, files: { "src/lib/helper.rb" => library }, edit: "src/lib/helper.rb",
+                             done: ->(calls, _) { calls.include?(["print", ["v2"]]) })
+    assert_includes calls, ["print", ["v2"]]
+    assert_includes log, "reloaded lib/helper.rb"
+  end
+
+  def test_reload_can_be_turned_off
+    calls, log = play_reload("loop { ns.print('v1'); ns.sleep(1) }", "loop { ns.print('v2'); ns.sleep(1) }",
+                             ram: 1.6, reload: false, done: ->(calls, _) { calls.size > 150 })
+    refute_includes calls, ["print", ["v2"]]
+    refute_includes log, "reloaded"
+  end
+
   # -- The game's Remote API -------------------------------------------------
 
   def test_connecting_syncs_definitions_files_the_proxy_and_stubs
@@ -259,7 +362,7 @@ class ServerTest < Minitest::Test
       eventually { game.pushed.key?("hello.js") }
       assert_equal FIXTURE_DEFINITIONS, File.read(File.join(dir, "NetscriptDefinitions.d.ts"))
       assert_includes game.pushed.fetch("hello.js"), "ns.ramOverride(1.7);"
-      assert_includes game.pushed.fetch("hello.js"), "await serve(ns, \"hello.rb\", #{PORT});"
+      assert_includes game.pushed.fetch("hello.js"), "await serve(ns, \"hello.rb\", #{PORT}, 1.7);"
       assert_equal Afterburner::Stubs.proxy_source, game.pushed.fetch("afterburner/proxy.js")
       assert game.pushed.key?("plain.js")
       refute game.pushed.key?("notes.md")
@@ -350,6 +453,17 @@ class ServerTest < Minitest::Test
       assert_equal [{ "op" => "result", "id" => 1, "value" => 5 }], relayed
     ensure
       game_task&.stop
+    end
+  end
+
+  def test_leaving_a_waiting_console_frees_it_for_the_next
+    serve do |_dir, log|
+      connect("/console?ram=2") { |client| receive(client) } # leave while it waits for the game
+      sleep 0.1
+      connect("/console?ram=2") do |client|
+        refute_equal "error", receive(client)["op"], "the first console should no longer count as open"
+      end
+      refute_includes log.string, "Another console"
     end
   end
 

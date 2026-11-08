@@ -92,7 +92,19 @@ writes to the script's log window (`ns.ui.open_tail` shows it).
 
 **Also there:** `ARGV` (the script's arguments), `exit`, `abort("why")`, `at_exit { }`, and Ruby's own
 `sleep` alongside `ns.sleep(ms)`. Errors from the game raise `NetscriptError`, which you can rescue; an
-uncaught Ruby exception shows up in the game's error dialog with its backtrace.
+uncaught Ruby exception shows up in the game's error dialog with its backtrace. Scripts can `require` any gem
+in your Gemfile.
+
+## Hot reload
+
+Save a script while it's running and afterburner restarts it in place: same pid, same arguments, new code,
+with `afterburner: reloaded` in its log. The old code's `at_exit` blocks run first. Saving a library under
+`lib/` reloads it and restarts the scripts that use it.
+
+The game won't let a running script use more RAM than it started with, and it counts every function the
+process has called, old code included. So if the new code would need more than the stub claimed, afterburner
+leaves the old code running and says so; run the script again to pick up the change. A reload also waits for
+any `ns` call in progress (a `hack`, say) to finish. `--no-reload` turns it off.
 
 ## Commands
 
@@ -105,7 +117,9 @@ uncaught Ruby exception shows up in the game's error dialog with its backtrace.
 | `afterburner stub FILE.rb` | Print the JavaScript stub the game runs for a script. |
 
 Options: `--port`, `--src` (Ruby scripts; default `src`), `--dist` (other files to sync; default from
-`filesync.json`, or none), `--definitions`, `--costs`. Run `afterburner --help` for details.
+`filesync.json`, or none), `--definitions`, `--costs`, `--no-reload`, `--origin URL` (accept the game from
+another address), and `--verbose` (log every message to and from scripts, for bug reports). Run
+`afterburner --help` for details.
 
 ## RAM
 
@@ -141,7 +155,9 @@ Ruby you write: that's your code, on your machine.
 
 - A Ruby loop that never waits (no `ns` call, `sleep`, or IO) stalls every Ruby script, the way a JavaScript loop
   without `await` freezes the game; killing it in the game can't interrupt it.
-- Libraries you `require_relative` load once; restart afterburner after editing one. Scripts reload every run.
+- One game at a time: a second game connecting (another browser tab, say) takes over from the first.
+- A game object's field whose name is also a Ruby method (`hash`, `class`, `display`) has to be read as
+  `record[:hash]`.
 - Reloading the game stops all running Ruby scripts.
 - Functions that take callbacks or return objects with methods (`ns.get_port_handle`, React-node printers) don't
   cross over, except `ns.at_exit { }`, which runs in Ruby.

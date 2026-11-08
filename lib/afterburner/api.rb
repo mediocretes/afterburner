@@ -44,6 +44,13 @@ module Afterburner
       entry([*path, member.name], member)
     end
 
+    # The RAM a script needs to use these functions (qualified names, as in
+    # Entry#qualified_name): the base cost, plus each function once.
+    def ram_for(names)
+      @ram_table ||= functions.to_h { [_1.qualified_name, _1.ram || 0.0] }
+      (BASE_RAM + names.uniq.sum { @ram_table.fetch(_1, 0.0) }).round(2)
+    end
+
     # Ruby names close to ruby_name, for "did you mean" messages.
     def suggestions(path, ruby_name)
       interface = interface_at(path) or return []
@@ -151,7 +158,7 @@ module Afterburner
       def method? = self.method
     end
 
-    INTERFACE = /\A(?:export )?interface (\w+)(?: extends ([\w, ]+?))? \{\s*\z/
+    INTERFACE = /\A(?:export )?(?:declare )?interface (\w+)(?:<[^>]*>)?(?: extends (.+?))? \{\s*\z/
 
     def initialize(source)
       @lines = source.lines.map(&:chomp)
@@ -163,7 +170,8 @@ module Afterburner
         index = 0
         while index < @lines.size
           if (match = INTERFACE.match(@lines[index]))
-            interface = Interface.new(match[1], match[2].to_s.split(/,\s*/), {})
+            parents = match[2].to_s.gsub(/<[^>]*>/, "").split(/,\s*/).map(&:strip).reject(&:empty?)
+            interface = Interface.new(match[1], parents, {})
             index = parse_members(index + 1, interface, "  ", found)
             found[interface.name] = interface
           end

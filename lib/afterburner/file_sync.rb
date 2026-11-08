@@ -1,10 +1,13 @@
 # frozen_string_literal: true
 
+require "find"
+
 module Afterburner
   # Keeps the game's home server in step with a folder on disk, the job
   # bitburner-filesync does: pushes every file when the game connects, then
   # each change. Deletes too, if allowed. Polls rather than using OS file
-  # events, so it works the same everywhere.
+  # events, so it works the same everywhere; excluded folders (node_modules
+  # among them) aren't even walked.
   class FileSync
     def initialize(root:, extensions:, exclude:, allow_deleting:, log:)
       @root = root
@@ -15,15 +18,24 @@ module Afterburner
       @state = {}
     end
 
+    # Synced files under the root: relative name → [mtime, size].
     def files
       return {} unless File.directory?(@root)
 
-      Dir.glob("**/*", base: @root).each_with_object({}) do |name, found|
-        next if excluded?(name) || !@extensions.include?(File.extname(name))
+      found = {}
+      Find.find(@root) do |path|
+        name = path.delete_prefix(@root).delete_prefix("/")
+        next if name.empty?
 
-        path = File.join(@root, name)
-        found[name] = [File.mtime(path).to_f, File.size(path)] if File.file?(path)
+        if File.directory?(path)
+          Find.prune if excluded?(name)
+        elsif @extensions.include?(File.extname(name)) && !excluded?(name)
+          found[name] = [File.mtime(path).to_f, File.size(path)]
+        end
+      rescue SystemCallError
+        next # removed while we looked
       end
+      found
     end
 
     def push_all(link)
@@ -59,6 +71,12 @@ module Afterburner
 
     def push(link, name) = link.push_file(name, File.read(File.join(@root, name)))
 
-    def excluded?(name) = @exclude.any? { name == _1 || name.start_with?("#{_1}/") }
+    def excluded?(name)
+      parts = name.split("/")
+      @exclude.any? do |pattern|
+        # "dir/sub" matches that path; a bare name like "node_modules" matches at any depth.
+        name == pattern || name.start_with?("#{pattern}/") || (!pattern.include?("/") && parts.include?(pattern))
+      end
+    end
   end
 end

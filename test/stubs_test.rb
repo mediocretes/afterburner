@@ -37,7 +37,7 @@ class StubsTest < Minitest::Test
     assert_includes content, "// RAM: 1.6 base + hack 0.1"
     assert_includes content, 'import { serve } from "afterburner/proxy";'
     assert_includes content, "ns.ramOverride(1.7);"
-    assert_includes content, 'await serve(ns, "farm.rb", 12525);'
+    assert_includes content, 'await serve(ns, "farm.rb", 12525, 1.7);'
   end
 
   def test_subdirectories_and_libraries

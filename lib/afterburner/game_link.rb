@@ -26,9 +26,15 @@ module Afterburner
     # Reads the game's answers until it disconnects. Run it in its own task.
     def run
       while (message = @connection.read)
-        reply = JSON.parse(message.to_str)
-        @pending.delete(reply["id"])&.resolve(reply)
+        reply = begin
+          JSON.parse(message.to_str)
+        rescue JSON::ParserError
+          next # not ours to answer; keep listening
+        end
+        @pending.delete(reply["id"])&.resolve(reply) if reply.is_a?(Hash)
       end
+    rescue *STOPPED
+      raise
     rescue StandardError
       nil
     ensure

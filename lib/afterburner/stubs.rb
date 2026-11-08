@@ -50,7 +50,7 @@ module Afterburner
         /** @param {NS} ns */
         export async function main(ns) {
           ns.ramOverride(#{claim});
-          await serve(ns, #{JSON.generate(script)}, #{@port});
+          await serve(ns, #{JSON.generate(script)}, #{@port}, #{claim});
         }
       JS
     end
@@ -105,6 +105,11 @@ module Afterburner
     end
 
     def render_one(script, scanner)
+      unless Scripts::NAME.match?(script)
+        warn_once("skipping #{script}: script names can only use letters, digits, '.', '-', '_', and '/'")
+        return nil
+      end
+
       name = script.sub(/\.rb\z/, ".js")
       twin = @twins.flat_map { |dir| [name, name.sub(/\.js\z/, ".ts")].map { File.join(dir, _1) } }.find { File.exist?(_1) }
       if twin

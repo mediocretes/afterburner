@@ -9,9 +9,12 @@ require "fileutils"
 require "json"
 require "logger"
 require "protocol/http/response"
+require "set"
 require "uri"
 
 module Afterburner
+  class PortInUse < StandardError; end
+
   # One local server for everything, on one port (12525 by default, the same
   # as bitburner-filesync, which it replaces):
   #
@@ -30,11 +33,14 @@ module Afterburner
     # A game built from source and served locally, e.g. a fork.
     LOCAL_ORIGIN = %r{\Ahttps?://(localhost|127\.0\.0\.1)(:\d+)?\z}
     TICK = 0.5
+    # Fewer functions than this in the definitions means the parser has
+    # probably fallen behind a change in the file's format.
+    EXPECTED_FUNCTIONS = 300
 
-    def initialize(config, log:, origins: DEFAULT_ORIGINS)
+    def initialize(config, log:)
       @config = config
       @log = log
-      @origins = origins
+      @origins = DEFAULT_ORIGINS + config.origins
       @scripts = Scripts.new(config.src)
       @costs = RamCosts.new(config.costs)
       @stubs = Stubs.new(scripts: @scripts, definitions: config.definitions, costs: @costs, port: config.port,
@@ -43,12 +49,15 @@ module Afterburner
                                            allow_deleting: config.allow_deleting, log:)
       @link = nil
       @console = nil
+      @sessions = Set.new
+      @stamps = nil
     end
 
     # Serves until the task running it is stopped: Sync { server.run }.
     def run
       endpoint = Async::HTTP::Endpoint.parse("http://localhost:#{@config.port}")
-      listener = Async { Async::HTTP::Server.for(endpoint) { |request| handle(request) }.run }
+      bound = bind(endpoint)
+      listener = Async { Async::HTTP::Server.new(method(:handle), bound, protocol: endpoint.protocol, scheme: endpoint.scheme).run }
       @log.info("listening on localhost:#{@config.port}; in the game, connect Options → Remote API to port #{@config.port}")
       loop do
         tick
@@ -56,6 +65,7 @@ module Afterburner
       end
     ensure
       listener&.stop
+      bound&.close
     end
 
     def allowed_origin?(origin) = origin.nil? || @origins.include?(origin) || LOCAL_ORIGIN.match?(origin)
@@ -64,10 +74,50 @@ module Afterburner
 
     private
 
+    # Binds now, so a busy port is an error here rather than a quiet failure
+    # in a background task.
+    def bind(endpoint)
+      endpoint.bound
+    rescue Errno::EADDRINUSE
+      raise PortInUse, "port #{@config.port} is already in use; is bitburner-filesync, or another afterburner, still running?"
+    end
+
     def tick
       link = live_link
       @files&.tick(link)
       @stubs.tick(link)
+      reload_changed_scripts if @config.reload
+    end
+
+    # Hot reload. Libraries a running script has loaded are loaded again
+    # first, so the restarted script sees their new code too.
+    def reload_changed_scripts
+      stamps = @scripts.all_files.to_h { [_1, File.mtime(_1).to_f] if File.exist?(_1) }.compact
+      changed = @stamps ? stamps.select { |file, stamp| @stamps.key?(file) && @stamps[file] != stamp }.keys : []
+      @stamps = stamps
+      return if changed.empty? || @sessions.empty?
+
+      reload_libraries(changed)
+      @sessions.each { |session| session.reload(ram_api) if session.files.intersect?(changed) }
+    end
+
+    # Through require, not load: a plain load evaluates under the thread's
+    # current top-level wrapper, which belongs to whichever script fiber last
+    # entered a wrapped load, so the library would land inside that script's
+    # module. require always evaluates at the real top level.
+    def reload_libraries(changed)
+      loaded = $LOADED_FEATURES.to_set
+      changed.select { loaded.include?(_1) }.each do |file|
+        verbose = $VERBOSE
+        $VERBOSE = nil # constants get redefined; that's the point
+        $LOADED_FEATURES.delete(file)
+        require(file)
+        @log.info("reloaded #{file.delete_prefix("#{@scripts.root}/")}")
+      rescue ScriptError, StandardError => e
+        @log.warn("reloading #{file.delete_prefix("#{@scripts.root}/")} failed: #{e.message}")
+      ensure
+        $VERBOSE = verbose
+      end
     end
 
     def handle(request)
@@ -116,6 +166,11 @@ module Afterburner
         File.write(@config.definitions, definitions)
         @log.info("saved the game's #{File.basename(@config.definitions)}")
       end
+      count = api.functions.count
+      if count < EXPECTED_FUNCTIONS
+        @log.warn("found only #{count} functions in #{File.basename(@config.definitions)}; " \
+                  "its format may have changed. Please report this to afterburner.")
+      end
       @files&.push_all(link)
       @stubs.push_all(link)
     rescue GameLink::Error => e
@@ -126,11 +181,25 @@ module Afterburner
 
     def run_script(connection)
       start = read_json(connection) or return
-      if start["script"] == Stubs::CONSOLE_SCRIPT
-        attach_console_stub(connection, start)
-      else
-        Session.new(connection, api:, scripts: @scripts, costs: @costs, log: @log).run(start)
+      return attach_console_stub(connection, start) if start["script"] == Stubs::CONSOLE_SCRIPT
+      unless File.exist?(@config.definitions)
+        return say(connection, op: "fail", message: "afterburner doesn't have the game's definitions yet. " \
+                                                    "Reconnect under Options → Remote API, then run this again.")
       end
+
+      session = Session.new(connection, api:, scripts: @scripts, costs: @costs, ram_api:, log: @log)
+      @sessions << session
+      session.run(start)
+    ensure
+      @sessions.delete(session) if session
+    end
+
+    # Names and costs, with costs measured in the game where there are any.
+    def ram_api
+      key = [File.mtime(@config.definitions), @costs.load]
+      @ram_api = nil unless @ram_api_key == key
+      @ram_api_key = key
+      @ram_api ||= Api.load(@config.definitions, measured: @costs.load)
     end
 
     def api
@@ -153,6 +222,28 @@ module Afterburner
       return say(client, op: "error", message: "--ram must be at least #{Api::BASE_RAM}") if claim < Api::BASE_RAM
 
       @console = Async::Variable.new
+      waiting = Async { wait_for_console_stub(client, claim) }
+      # The console sends nothing until it's attached, so a read that ends
+      # means you left while it was waiting.
+      left = Async do
+        client.read
+        waiting.stop
+      end
+      stub, start, done = waiting.wait
+      left.stop
+      return unless stub
+
+      @log.info("console attached to pid #{start['pid']} (#{claim} GB)")
+      say(client, op: "attached", pid: start["pid"], ram: claim)
+      relay(client, stub)
+    rescue ArgumentError
+      say(client, op: "error", message: "--ram must be a number of GB")
+    ensure
+      done&.resolve(true)
+      @console = nil
+    end
+
+    def wait_for_console_stub(client, claim)
       announced = false
       until (link = live_link)
         say(client, op: "status", message: "Waiting for the game to connect its Remote API to port #{@config.port}...") unless announced
@@ -160,16 +251,11 @@ module Afterburner
         sleep TICK
       end
       link.push_file(Stubs::CONSOLE, @stubs.console_source(claim))
-      say(client, op: "status", message: "In the game, run: run #{Stubs::CONSOLE}")
-      stub, start, done = @console.wait
-      @log.info("console attached to pid #{start['pid']} (#{claim} GB)")
-      say(client, op: "attached", pid: start["pid"], ram: claim)
-      relay(client, stub)
-      done.resolve(true)
-    rescue ArgumentError
-      say(client, op: "error", message: "--ram must be a number of GB")
-    ensure
-      @console = nil
+      say(client, op: "status", message: "In the game, run: run #{Stubs::CONSOLE} (it claims #{claim} GB; change that with --ram)")
+      @console.wait
+    rescue GameLink::Error => e
+      say(client, op: "error", message: e.message)
+      nil
     end
 
     def attach_console_stub(stub, start)
