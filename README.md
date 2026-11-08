@@ -147,9 +147,9 @@ Ruby you write: that's your code, on your machine.
 ## Platforms
 
 - **Web build, in Chrome**: tested. Needs the local network permission.
-- **Steam build**: should work, with no permission needed, but not tested yet. If afterburner logs
+- **Steam build**: tested on macOS. No permission needed. If afterburner ever logs
   `refused a connection from …`, please open an issue with that origin.
-- **Windows**: nothing is deliberately Unix-only (pure Ruby, polling file watch), but it's untested.
+- **Windows**: the unit tests pass there in CI; not yet tried against the game.
 
 ## Limits
 

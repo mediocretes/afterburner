@@ -3,7 +3,8 @@
 This is the design document: enough to pick the project up cold. The README covers using it.
 
 Status: 0.1.0, a working prototype. Verified end to end against the live web game (v3.0.1) in a headless
-browser (`rake e2e`, 14 checks). Not yet tried in the Steam build or on Windows.
+browser (`rake e2e`, 15 checks), and by hand in the Steam build on macOS. Unit tests pass on Linux, macOS,
+and Windows; not yet tried against the game on Windows.
 
 ## The shape of it
 
@@ -160,7 +161,7 @@ Granting the game local network access lets any script in the game reach localho
 
 - It listens on localhost only.
 - Browser WebSockets on `/` and `/script` must come from the game: the web build's origin, `file://` (Steam,
-  which loads the game from a file; the exact header is unverified), or `http(s)://localhost:*` (a locally
+  which loads the game from a file), or `http(s)://localhost:*` (a locally
   served build, e.g. a fork). A missing `Origin` (a local non-browser client) is allowed: local processes can
   already run anything.
 - `/console`, `/save`, and `/ram` refuse anything with an `Origin`, i.e. any browser.
@@ -196,9 +197,10 @@ It is not a sandbox for the Ruby you write.
 
 - **Web build in Chrome**: verified. Chrome's Local Network Access blocks `ws://localhost` from the https game
   page until the user grants the site permission (Playwright: `permissions: ["local-network-access"]`).
-- **Steam build**: loads the game with `window.loadFile("index.html")`, so pages have a `file://` origin, and
-  disables background throttling (scripts keep full speed when the window isn't focused, unlike a background
-  Chrome tab). Expected to work without any permission; untested.
+- **Steam build**: loads the game with `window.loadFile("index.html")`, and its WebSockets carry
+  `Origin: file://` (seen on macOS). It sets no permission handler, so Electron grants local network access
+  without asking. It also disables background throttling: scripts keep full speed when the window isn't
+  focused, unlike a background Chrome tab. Tested by hand on macOS.
 - **Windows**: nothing intentionally Unix-only; `async`/`io-event` support Windows. Untested.
 
 ## Known limits
@@ -224,7 +226,9 @@ What's most likely to break, and what watches for it:
   busy port is an error message rather than a quiet failure in a background task.
 - **The game's error text.** `NetscriptError.from_game` strips the "RUNTIME ERROR … (PID - n)" header, and
   the proxy's RAM hint looks for "RAM USAGE ERROR"; if either wording changes, you just get the raw message.
-- **Steam's origin**, unverified: `--origin` accepts another one without a code change.
+- **The game's origin.** The web build's is fixed; Steam's is `file://` (seen on macOS). If either
+  changes, `--origin` accepts the new one without a code change, and `--verbose` logs every connection's
+  origin.
 
 `--verbose` logs every message between afterburner and running scripts.
 

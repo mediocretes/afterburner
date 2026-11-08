@@ -124,6 +124,7 @@ module Afterburner
     def handle(request)
       uri = URI(request.path)
       origin = request.headers["origin"]&.to_s
+      @log.debug { "#{request.method} #{uri.path} from origin #{origin.inspect}" }
       case uri.path
       when "/" then websocket(request, allowed_origin?(origin), origin) { attach_game(_1) }
       when "/script" then websocket(request, allowed_origin?(origin), origin) { run_script(_1) }
