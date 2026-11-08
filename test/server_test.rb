@@ -283,6 +283,39 @@ class ServerTest < Minitest::Test
     assert_equal "exit", final["op"]
   end
 
+  def test_a_script_can_reopen_rubys_classes_and_its_own_classes_stay_its_own
+    played = play("class Float\n  def af_test_pct = \"\#{(self * 100).round}%\"\nend\nclass OnlyThisScript; end\nputs 0.25.af_test_pct")
+    assert_equal [["tprint", ["25%"]]], played.calls
+    refute Object.const_defined?(:OnlyThisScript), "a class the script made leaked to the top level"
+  ensure
+    Float.send(:remove_method, :af_test_pct) if Float.method_defined?(:af_test_pct)
+  end
+
+  def test_a_library_edited_while_nothing_runs_is_fresh_for_the_next_run
+    library = "module IdleReloadHelper\n  def self.tag = 'v1'\nend\n"
+    printed = []
+    serve(files: { "src/uses.rb" => "require_relative 'lib/helper'\nputs IdleReloadHelper.tag", "src/lib/helper.rb" => library }) do |dir, _log|
+      run = lambda do
+        connect("/script") do |connection|
+          transmit(connection, op: "start", script: "uses.rb", args: [], pid: 1, ram: 1.6)
+          while (message = receive(connection))
+            break unless %w[call costs].include?(message["op"])
+            next transmit(connection, op: "costs", costs: {}) if message["op"] == "costs"
+
+            printed << message["args"].first if message["path"] == ["tprint"]
+            transmit(connection, op: "result", id: message["id"], value: nil)
+          end
+        end
+      end
+      run.call
+      write(dir, "src/lib/helper.rb", library.sub("v1", "v2"))
+      File.utime(Time.now + 5, Time.now + 5, File.join(dir, "src/lib/helper.rb"))
+      sleep 0.8 # a tick or so, with nothing running
+      run.call
+    end
+    assert_equal %w[v1 v2], printed
+  end
+
   def test_refuses_names_outside_the_scripts_or_in_lib
     ["../outside.rb", "/etc/passwd", "lib/helper.rb", "missing.rb"].each do |name|
       played = play("puts 1", files: { "lib/helper.rb" => "" }, start: { op: "start", script: name, args: [], pid: 1 })

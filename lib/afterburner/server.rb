@@ -87,18 +87,24 @@ module Afterburner
       link = live_link
       @files&.tick(link)
       @stubs.tick(link)
-      reload_changed_scripts if @config.reload
+      notice_changed_scripts
     end
 
     # Hot reload. Libraries a running script has loaded are loaded again
     # first, so the restarted script sees their new code too.
-    def reload_changed_scripts
+    #
+    # A changed library is required again whether or not anything is running,
+    # so the next script to start gets the new code; restarting the scripts
+    # that are running is what --no-reload turns off.
+    def notice_changed_scripts
       stamps = @scripts.all_files.to_h { [_1, File.mtime(_1).to_f] if File.exist?(_1) }.compact
       changed = @stamps ? stamps.select { |file, stamp| @stamps.key?(file) && @stamps[file] != stamp }.keys : []
       @stamps = stamps
-      return if changed.empty? || @sessions.empty?
+      return if changed.empty?
 
       reload_libraries(changed)
+      return unless @config.reload
+
       @sessions.each { |session| session.reload(ram_api) if session.files.intersect?(changed) }
     end
 

@@ -70,7 +70,9 @@ launcher (`SCRIPTS=src`). From a terminal, it's `--src DIR` or the `AFTERBURNER_
 ## Writing Ruby scripts
 
 Each file under `src/` is a script (`src/tools/scan.rb` runs as `tools/scan.js`), except files under a `lib/`
-folder, which are libraries for scripts to `require_relative`.
+folder, which are libraries for scripts to `require_relative`. Put helpers, and patches to Ruby's own classes
+(`class Float; def to_pct …`), in `src/lib/`; a script can also reopen a class directly, and it reopens the
+real one.
 
 **`ns`** has every Netscript function, under Ruby names:
 
@@ -113,7 +115,8 @@ in your Gemfile.
 
 Save a script while it's running and afterburner restarts it in place: same pid, same arguments, new code,
 with `afterburner: reloaded` in its log. The old code's `at_exit` blocks run first. Saving a library under
-`lib/` reloads it and restarts the scripts that use it.
+`lib/` reloads it and restarts the scripts that use it; even with nothing running, the next script to start
+gets the new code.
 
 The game won't let a running script use more RAM than it started with, and it counts every function the
 process has called, old code included. So if the new code would need more than the stub claimed, afterburner
