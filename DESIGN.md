@@ -168,6 +168,12 @@ Granting the game local network access lets any script in the game reach localho
 - Only `.rb` files under `src/`, by plain relative name: no `..`, no absolute paths, nothing under `lib/`. The
   game never sends code.
 
+What it can't prevent: anything in the game can start any script in `src/`, with arguments of its choosing.
+A stub is an ordinary file in the save, so in-game code can write its own or copy one, and a secret embedded
+in stubs would be just as readable. That can't introduce code, since only what's already in `src/` runs, but
+a script that acts on the host (files, the network, shelling out) should treat `ARGV` as untrusted input.
+Scripts that only call `ns` give the game nothing it couldn't already do.
+
 It is not a sandbox for the Ruby you write.
 
 ## Files
