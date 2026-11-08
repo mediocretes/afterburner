@@ -164,6 +164,7 @@ class RecordingLink
   def push_file(name, content) = @pushed[name] = content
   def delete_file(name) = @deleted << name
   def all_files = @files
+  def all_file_metadata = @files.map { { "filename" => _1["filename"], "mtime" => _1["mtime"] } }
 end
 
 def quiet_log(io = StringIO.new) = Logger.new(io)

@@ -23,7 +23,7 @@ process on your machine, and borrows the game's `ns` over a WebSocket:
      │                  runs scout.rb; each ns call   │      serve(ns, "scout.rb")   │
      │                  goes back to the stub ───────▶│      makes the call          │
      │  ws /console ◀── afterburner console (IRB)     └──────────────────────────────┘
-     │  GET /save, /ram ◀── afterburner save / ram
+     │  GET /save, /ram, /sources ◀── afterburner save / ram / restore
 ```
 
 - **The stub** (pushed as `scout.js`) is a few lines: `ns.ramOverride(<cost>)` as the first statement of
@@ -86,7 +86,7 @@ message and backtrace.
 back. Leaving the console sends the stub `exit`; the stub stopping sends the console `ended`. On the console
 side, IRB runs on the main thread and the WebSocket in a background thread's reactor, talking through queues.
 
-**`/save` and `/ram?file=`**: plain HTTP for the CLI. `/save` returns the bytes `getSaveFile` describes (a
+**`/save`, `/ram?file=`, and `/sources`**: plain HTTP for the CLI. `/sources` lists the save's copies of the Ruby scripts, with contents and `mtime`, for `afterburner restore`. `/save` returns the bytes `getSaveFile` describes (a
 binary save arrives as one character per byte) with a suggested file name; `/ram` returns `calculateRam`.
 
 ## The Ruby side
@@ -111,6 +111,21 @@ the RAM scanner both use it, so anything a script can call is something it's cha
   gems too. `logger` writes to `ns.print`.
 - `at_exit` blocks run before the game hears a script is done, so they can still use `ns`. After a kill they
   run too, but `ns` calls in them raise rather than wait for an answer that won't come.
+
+## Ruby sources in the save
+
+`SourceBackup` keeps a copy of every `src/**/*.rb` in the save as `afterburner/src/<name>.txt` (the game stores
+only script and `.txt`/`.json`/`.css` files), so the code travels with it. On connect it pushes each script
+unless the save's copy is identical, or newer by the game's `mtime` (from `getAllFileMetadata`, allowing 2 s of
+clock difference); a newer copy is left in place with a warning. Copies with no local file are reported, not
+deleted: they may be another machine's. While connected, edits are pushed and deletions remove the copies
+this session put there.
+
+`afterburner restore` (`SourceRestore`, via the server's `/sources`) is the only way code comes back out, on
+purpose: any in-game script can write files to the save, so automatic restoring would let one plant Ruby that
+afterburner runs on the host. It writes missing files and newer copies, keeps newer local files unless
+`--force` (backing them up to `.afterburner/replaced/<time>/`), and refuses names that would land outside
+`src/`.
 
 ## Hot reload
 
@@ -179,6 +194,7 @@ It is not a sandbox for the Ruby you write.
 | `lib/afterburner/game_link.rb` | the game's Remote API connection |
 | `lib/afterburner/file_sync.rb` | syncing other files |
 | `lib/afterburner/stubs.rb` | building and pushing stubs |
+| `lib/afterburner/source_backup.rb` | copies of the Ruby sources in the save; `afterburner restore` |
 | `lib/afterburner/session.rb` | one running script, its protocol, hot reload |
 | `lib/afterburner/script_context.rb` | what a script sees at top level; routing `puts` to the game |
 | `lib/afterburner/console.rb` | the IRB side of `afterburner console` |

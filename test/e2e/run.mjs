@@ -286,6 +286,25 @@ async function main() {
     return output.match(/level=\d+/)[0];
   });
 
+  await check("Ruby sources are kept in the save, and afterburner restore brings them back", async () => {
+    await expectOutput(page, "ls afterburner/src", /greet\.rb\.txt/);
+    const target = path.join(WORK, "restored");
+    fs.mkdirSync(target);
+    const restore = spawn("bundle", ["exec", "exe/afterburner", "restore", "--port", String(PORT), "--src", target], { cwd: ROOT, shell: SHELL });
+    let output = "";
+    restore.stdout.on("data", (chunk) => (output += chunk));
+    restore.stderr.on("data", (chunk) => (output += chunk));
+    const code = await new Promise((resolve) => restore.on("close", resolve));
+    if (code !== 0) throw new Error(output);
+    // reloadme.rb was edited during the run, so its copy shows edits reach the save too.
+    for (const name of ["greet.rb", "lib/greeting.rb", "reloadme.rb"]) {
+      const restored = path.join(target, name);
+      if (!fs.existsSync(restored)) throw new Error(`${name} wasn't restored:\n${output}`);
+      if (fs.readFileSync(restored, "utf8") !== fs.readFileSync(path.join(SRC, name), "utf8")) throw new Error(`${name} differs`);
+    }
+    return `${fs.readdirSync(target, { recursive: true }).filter((f) => f.endsWith(".rb")).length} files`;
+  });
+
   await check("a stub started while afterburner is down waits for it", async () => {
     watcher.kill();
     await new Promise((resolve) => watcher.on("close", resolve));

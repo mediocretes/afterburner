@@ -23,6 +23,7 @@ module Afterburner
   #   ws  /console    `afterburner console`
   #   GET /save       `afterburner save`: the live save file
   #   GET /ram?file=  `afterburner ram`: the game's own RAM figure for a script
+  #   GET /sources    `afterburner restore`: the save's copies of the Ruby scripts
   #
   # It listens on localhost only. Browser connections have to come from the
   # game's own pages, so another website open in the same browser can't drive
@@ -48,6 +49,7 @@ module Afterburner
                          twins: [config.dist, config.src].compact, log:)
       @files = config.dist && FileSync.new(root: config.dist, extensions: config.extensions, exclude: config.exclude,
                                            allow_deleting: config.allow_deleting, log:)
+      @backup = SourceBackup.new(scripts: @scripts, log:)
       @link = nil
       @console = nil
       @sessions = Set.new
@@ -61,7 +63,12 @@ module Afterburner
       listener = Async { Async::HTTP::Server.new(method(:handle), bound, protocol: endpoint.protocol, scheme: endpoint.scheme).run }
       @log.info("listening on localhost:#{@config.port}; in the game, connect Options → Remote API to port #{@config.port}")
       loop do
-        tick
+        begin
+          tick
+        rescue StandardError => e
+          # One broken step mustn't stop the server; say so and keep going.
+          @log.error("#{e.message} (#{e.class}) at #{e.backtrace&.first}")
+        end
         sleep TICK
       end
     ensure
@@ -87,6 +94,7 @@ module Afterburner
       link = live_link
       @files&.tick(link)
       @stubs.tick(link)
+      @backup.tick(link)
       reload_changed_scripts if @config.reload
     end
 
@@ -131,6 +139,7 @@ module Afterburner
       when "/console" then websocket(request, origin.nil?, origin) { console(_1, query(uri)["ram"]) }
       when "/save" then origin.nil? ? save_response : refuse(origin)
       when "/ram" then origin.nil? ? ram_response(query(uri)["file"]) : refuse(origin)
+      when "/sources" then origin.nil? ? sources_response : refuse(origin)
       else text(404, "afterburner: nothing at #{uri.path}\n")
       end
     rescue URI::InvalidURIError
@@ -175,6 +184,7 @@ module Afterburner
       end
       @files&.push_all(link)
       @stubs.push_all(link)
+      @backup.push_all(link)
     rescue GameLink::Error => e
       @log.warn("syncing with the game failed: #{e.message}")
     end
@@ -300,6 +310,14 @@ module Afterburner
       extension = data.b.start_with?("\x1F\x8B".b) ? ".json.gz" : ".json"
       Protocol::HTTP::Response[200, { "content-type" => "application/octet-stream",
                                       "x-afterburner-filename" => "bitburnerSave_#{Time.now.to_i}#{extension}" }, [data]]
+    rescue GameLink::Error => e
+      text(502, "#{e.message}\n")
+    end
+
+    def sources_response
+      link = live_link or return text(503, "The game isn't connected to afterburner.\n")
+      saved = SourceBackup.saved(link).map(&:to_h)
+      Protocol::HTTP::Response[200, { "content-type" => "application/json" }, [JSON.generate(saved)]]
     rescue GameLink::Error => e
       text(502, "#{e.message}\n")
     end
