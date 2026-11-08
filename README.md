@@ -55,6 +55,18 @@ afterburner reads its `filesync.json` and takes over from bitburner-filesync. In
 `bitburner-filesync` for `bundle exec afterburner watch`. `tsc` keeps compiling `src/*.ts` into `dist/`;
 afterburner syncs `dist/` and runs `src/*.rb`.
 
+### Starting it with a double-click
+
+[`launchers/`](launchers) has two files to copy into your project, next to your Gemfile:
+`Start afterburner.command` for macOS and `Start afterburner.cmd` for Windows. Double-click one and it opens
+a window running everything the project needs:
+- it installs anything missing (`bundle install`, and `npm install` for the TypeScript template);
+- then it runs `npm run watch` if your `package.json` has a watch script, or `afterburner watch` if not.
+
+Close the window, or press Ctrl-C, to stop. afterburner runs only while that window is open, and nothing is
+installed to start it for you. The folder whose files become the game's home folder is set at the top of each
+launcher (`SCRIPTS=src`). From a terminal, it's `--src DIR` or the `AFTERBURNER_SRC` environment variable.
+
 ## Writing Ruby scripts
 
 Each file under `src/` is a script (`src/tools/scan.rb` runs as `tools/scan.js`), except files under a `lib/`
@@ -118,7 +130,7 @@ any `ns` call in progress (a `hack`, say) to finish. `--no-reload` turns it off.
 | `afterburner ram FILE...` | RAM a script needs: `.rb` files are scanned locally, with a breakdown; anything else is the game's own figure. |
 | `afterburner stub FILE.rb` | Print the JavaScript stub the game runs for a script. |
 
-Options: `--port`, `--src` (Ruby scripts; default `src`), `--dist` (other files to sync; default from
+Options: `--port`, `--src` (Ruby scripts; default `src`, or `AFTERBURNER_SRC`), `--dist` (other files to sync; default from
 `filesync.json`, or none), `--definitions`, `--costs`, `--no-reload`, `--origin URL` (accept the game from
 another address), and `--verbose` (log every message to and from scripts, for bug reports). Run
 `afterburner --help` for details.
