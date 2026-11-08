@@ -28,7 +28,7 @@ module Afterburner
       @warned = Set.new
     end
 
-    def self.proxy_source = File.read(File.expand_path("proxy.js", __dir__))
+    def self.proxy_source = Afterburner.read_text(File.expand_path("proxy.js", __dir__))
 
     # Every stub, keyed by its name in the game. Empty until the game has sent
     # its NetscriptDefinitions.d.ts, which the RAM scan needs.

@@ -230,6 +230,11 @@ What's most likely to break, and what watches for it:
   changes, `--origin` accepts the new one without a code change, and `--verbose` logs every connection's
   origin.
 
+- **The locale.** Started without `LANG` (from a launcher, a scheduler, an editor), Ruby takes files to be
+  US-ASCII, and the game's definitions file isn't ASCII. afterburner reads every text file as UTF-8
+  (`Afterburner.read_text`), and the CLI sets `Encoding.default_external` to UTF-8 so scripts behave as they do
+  in a terminal.
+
 `--verbose` logs every message between afterburner and running scripts.
 
 ## Next steps
