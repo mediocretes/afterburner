@@ -261,9 +261,7 @@ module Afterburner
 
       granted = start["ram"] || claim.gb
       @log.info("console attached to pid #{start['pid']} (#{granted} GB)")
-      # The game rounds RAM to hundredths of a GB.
-      short = claim.gb && granted && granted < claim.gb.round(2) - 1e-9
-      say(client, op: "attached", pid: start["pid"], ram: granted, short:)
+      say(client, op: "attached", pid: start["pid"], ram: granted)
       relay(client, stub)
     ensure
       done&.resolve(true)

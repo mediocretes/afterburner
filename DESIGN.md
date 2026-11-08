@@ -83,9 +83,14 @@ message and backtrace.
 **Console** (`/console`): `afterburner console` connects with `?ram=`, GB or a percentage (default `80%`).
 afterburner pushes `afterburner/console.js`, a stub with that claim whose script is the special name `@console`,
 and sends `status` messages until it's run. A percentage is worked out by the stub, since only the game knows
-the server it runs on: `getServerMaxRam() - getServerUsedRam()` plus what it already holds, times the share, and
-never less than it holds (0.1 GB of the claim pays for those two calls). The stub's `start` carries what
-`ramOverride` granted, and the console reports that, saying so when it's less than a GB `--ram` asked for. Then it relays: `call` frames from the console to the stub, `result`/`error`
+the server it runs on. It starts at 1.7 GB (base plus `getServerMaxRam` and `getServerUsedRam`), then claims
+the share of what's free plus what it holds. The stub's `start` carries what it holds, and the console reports
+that.
+
+Every stub's `main` starts with `ns.ramOverride(<number>);`. The game reads that as the script's whole static
+RAM without scanning the code, but only as the first statement and only with a literal. Anything else and it
+charges every name in the stub and `proxy.js` that matches any `ns` function, which for the console stub came
+to 33.7 GB. Then it relays: `call` frames from the console to the stub, `result`/`error`
 back. Leaving the console sends the stub `exit`; the stub stopping sends the console `ended`. On the console
 side, IRB runs on the main thread and the WebSocket in a background thread's reactor, talking through queues.
 

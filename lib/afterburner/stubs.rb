@@ -83,17 +83,23 @@ module Afterburner
       JS
     end
 
-    # The console's stub. A percentage is worked out in the game: the RAM free
-    # on the server, plus what the stub already holds, times the share; never
-    # less than it already holds. Either way it tells afterburner what the game
-    # granted, which is less than asked if the server didn't have it free.
+    # What a percentage console stub starts with: the base cost and the two
+    # calls it makes to see what's free (getServerMaxRam, getServerUsedRam).
+    CONSOLE_PROBE_RAM = (Api::BASE_RAM + 0.1).round(2)
+
+    # The console's stub. Like every stub, main starts with
+    # ns.ramOverride(<number>), which the game takes as the script's whole
+    # static RAM without scanning the code (it scans only a literal there, and
+    # only as the first statement). A GB claim is that number. A percentage
+    # starts with just enough to look, then claims its share in the game: the
+    # RAM free on the server plus what it holds, times the share. Either way it
+    # tells afterburner what it holds.
     def console_source(claim)
-      want = if claim.percent
-               "Math.max(ns.ramOverride(), Math.floor((ns.getServerMaxRam() - ns.getServerUsedRam() + ns.ramOverride()) " \
-                 "* #{claim.percent / 100.0} * 100) / 100)"
-             else
-               claim.gb.to_s
-             end
+      start = claim.percent ? CONSOLE_PROBE_RAM : claim.gb
+      share = <<~JS.gsub(/^/, "  ") if claim.percent
+        const free = ns.getServerMaxRam() - ns.getServerUsedRam() + ns.ramOverride();
+        ns.ramOverride(Math.floor(free * #{claim.percent / 100.0} * 100) / 100);
+      JS
       <<~JS
         #{MARKER} for `afterburner console`. Don't edit it.
         // RAM: #{claim}
@@ -101,8 +107,8 @@ module Afterburner
 
         /** @param {NS} ns */
         export async function main(ns) {
-          const claim = ns.ramOverride(#{want});
-          await serve(ns, #{JSON.generate(CONSOLE_SCRIPT)}, #{@port}, claim);
+          ns.ramOverride(#{start});
+        #{share}  await serve(ns, #{JSON.generate(CONSOLE_SCRIPT)}, #{@port}, ns.ramOverride());
         }
       JS
     end

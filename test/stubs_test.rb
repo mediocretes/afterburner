@@ -101,20 +101,36 @@ class StubsTest < Minitest::Test
     assert_equal ["farm.js"], @link.deleted
   end
 
+  # The game takes a stub's static RAM from ns.ramOverride(<number>) without
+  # scanning the code, but only when that's main's first statement and the
+  # argument is a literal. Otherwise it charges every name in the stub and
+  # proxy.js that matches any ns function: 33.7 GB for the console stub.
+  def static_ram(content)
+    first = content[/export async function main\(ns\) \{\n(.*)$/, 1].to_s.strip
+    first[/\Ans\.ramOverride\((\d+(?:\.\d+)?)\);\z/, 1]&.then { Float(_1) }
+  end
+
   def test_console_stub_claiming_gb
     content = stubs.console_source(Afterburner::ConsoleClaim.parse("8"))
-    assert_includes content, "ns.ramOverride(8.0);"
+    assert_equal 8.0, static_ram(content)
     assert_includes content, '"@console"'
     assert_includes content, "// RAM: 8 GB"
   end
 
   def test_console_stub_claiming_a_share_of_free_ram
     content = stubs.console_source(Afterburner::ConsoleClaim.parse("80%"))
-    assert_includes content, "ns.getServerMaxRam() - ns.getServerUsedRam() + ns.ramOverride()"
-    assert_includes content, "* 0.8 * 100) / 100"
-    assert_includes content, "Math.max(ns.ramOverride(),"
+    assert_equal 1.7, static_ram(content), "starts with just enough to look at the server"
+    assert_includes content, "const free = ns.getServerMaxRam() - ns.getServerUsedRam() + ns.ramOverride();"
+    assert_includes content, "ns.ramOverride(Math.floor(free * 0.8 * 100) / 100);"
     assert_includes content, "// RAM: 80% of the free RAM where it runs"
-    assert_includes content, ", claim);"
+    assert_includes content, "ns.ramOverride());"
+  end
+
+  def test_script_stubs_start_with_a_literal_ram_override
+    write("farm.rb", "ns.hack(ARGV.first)")
+    rendered = stubs.render
+    refute_empty rendered
+    rendered.each_value { |stub| refute_nil static_ram(stub.content), stub.name }
   end
 
   def test_console_claims

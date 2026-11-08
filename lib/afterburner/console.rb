@@ -144,7 +144,6 @@ module Afterburner
         when "attached"
           @pid = event["pid"]
           @out.puts("Attached to pid #{@pid}, with #{event['ram']} GB claimed. `ns` is live; `exit` to leave.")
-          @out.puts("That's less than --ram asked for: the server didn't have it free.") if event["short"]
           return true
         else
           @out.puts(event["message"])
