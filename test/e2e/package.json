@@ -1,0 +1,12 @@
+{
+  "name": "afterburner-e2e",
+  "private": true,
+  "description": "End-to-end test of afterburner against the live web game; see run.mjs.",
+  "type": "module",
+  "scripts": {
+    "test": "node run.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.65.0"
+  }
+}
