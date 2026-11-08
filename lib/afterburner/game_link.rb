@@ -71,6 +71,7 @@ module Afterburner
     def delete_file(name) = request("deleteFile", { filename: name, server: "home" })
     def definitions = request("getDefinitionFile")
     def all_files = request("getAllFiles", { server: "home" })
+    def all_file_metadata = request("getAllFileMetadata", { server: "home" })
     def calculate_ram(name) = request("calculateRam", { filename: name, server: "home" })
 
     # The live save, as the bytes an in-game export would give you.

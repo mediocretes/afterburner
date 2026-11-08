@@ -129,11 +129,31 @@ any `ns` call in progress (a `hack`, say) to finish. `--no-reload` turns it off.
 | `afterburner save [FILE]` | Download the game's live save, as the in-game export would. |
 | `afterburner ram FILE...` | RAM a script needs: `.rb` files are scanned locally, with a breakdown; anything else is the game's own figure. |
 | `afterburner stub FILE.rb` | Print the JavaScript stub the game runs for a script. |
+| `afterburner restore [--dry-run] [--force]` | Copy the Ruby scripts kept in the game's save into `src/` (see below). |
 
 Options: `--port`, `--src` (Ruby scripts; default `src`, or `AFTERBURNER_SRC`), `--dist` (other files to sync; default from
 `filesync.json`, or none), `--definitions`, `--costs`, `--no-reload`, `--origin URL` (accept the game from
 another address), and `--verbose` (log every message to and from scripts, for bug reports). Run
 `afterburner --help` for details.
+
+## Your Ruby code travels with the save
+
+The game keeps JavaScript in your save, but Ruby lives on your disk. So afterburner also keeps a copy of every
+`.rb` under `src/` in the save, as `afterburner/src/hello.rb.txt`, updated as you edit. Move the save to
+another machine (Steam Cloud, an export) and the code goes with it; there, run:
+
+```sh
+bundle exec afterburner restore --dry-run   # what would change
+bundle exec afterburner restore
+```
+
+It writes what `src/` is missing and what the save has newer, and keeps your file where it's newer (`--force`
+takes the save's, after backing yours up in `.afterburner/replaced/`). Going the other way, afterburner never
+overwrites a newer copy in the save with an older local file; it says so instead.
+
+Getting code *out* of the save is never automatic, because any script in the game can write files there: a
+script you pasted in could plant Ruby that afterburner would then run on your computer. `restore` lists
+everything it writes; look over code you didn't write.
 
 ## RAM
 
