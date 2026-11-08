@@ -102,6 +102,13 @@ the RAM scanner both use it, so anything a script can call is something it's cha
 - A short name never shadows a real function.
 - Keyword arguments become the trailing options object, keys camelCased.
 - `NS` is a `BasicObject`, so names like `print`, `format`, and `sleep` reach the game rather than `Kernel`.
+  Besides the game's names it answers only Ruby's reflection protocol (`inspect`, `respond_to?`, and `methods`,
+  which lists the Ruby names so IRB can tab-complete them). IRB only completes after a variable or a constant;
+  `ns` is one at the console prompt because the prompt's binding is made inside `Console#start_irb(ns)`.
+- `AB` holds afterburner's own tools (`AB.functions`, `AB.doc`), so they never collide with a game function. It
+  finds the API through the same fiber-local session as `ns`. Docs come from the definitions file: the parser
+  keeps each member's JSDoc and signature, and `AB::Docs` renders them with Ruby names. An options object as the
+  last parameter shows as `**opts` with its fields listed as keywords.
 - `Record` wraps game objects: snake_case readers, `?` predicates (dropping `has`/`is`), `[]`, `to_h`, pattern
   matching. Sent back to the game as the original object.
 - Each run is `load(path, fresh_module)`, so scripts' constants and methods don't leak into each other. The
@@ -215,6 +222,7 @@ It is not a sandbox for the Ruby you write.
 | `lib/afterburner/console.rb` | the IRB side of `afterburner console` |
 | `lib/afterburner/api.rb` | definitions parser, name resolution, documented costs |
 | `lib/afterburner/ns.rb` | the `ns` proxy, `NetscriptError` |
+| `lib/afterburner/ab.rb` | `AB`: `AB.functions`, `AB.doc`, and rendering the docs |
 | `lib/afterburner/record.rb` | `Record`; `Codec` for values on the wire |
 | `lib/afterburner/ram_scanner.rb` | the RAM scan |
 | `lib/afterburner/ram_costs.rb` | the measured-cost cache |

@@ -42,7 +42,7 @@ module Afterburner
   # The game charges each distinct function once per process, so functions
   # the old code called still count.
   class Session
-    attr_reader :script, :pid, :args, :ns, :logger, :files
+    attr_reader :script, :pid, :args, :ns, :logger, :files, :api
 
     def initialize(connection, api:, scripts:, log:, costs: nil, ram_api: nil)
       @connection = connection

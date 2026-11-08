@@ -69,6 +69,59 @@ module Afterburner
       end
     end
 
+    # Resolves a name as AB takes it: a Ruby or JavaScript name, dotted through
+    # namespaces, with or without "ns.": "scan", "cloud.server_names",
+    # "ns.hacknet.numNodes". Returns an Entry, or nil.
+    def lookup(name)
+      *namespaces, last = name.to_s.delete_prefix("ns.").split(".")
+      return nil unless last
+
+      path = namespaces.reduce([]) do |found, segment|
+        entry = resolve(found, segment)
+        return nil unless entry&.namespace?
+
+        entry.path
+      end
+      resolve(path, last)
+    end
+
+    # The parsed definition behind an Entry: its signature, type, and JSDoc.
+    def member(entry)
+      interface = interface_at(entry.path[0...-1]) or return nil
+      members_of(interface)[entry.path.last]
+    end
+
+    # Every Ruby name ns (path []) or a namespace answers to: snake_case and the
+    # short aliases, but not the camelCase JavaScript names.
+    def names_at(path)
+      interface = interface_at(path) or return []
+      names_for(interface).keys.grep(/\A[a-z][a-z0-9_]*\??\z/).sort
+    end
+
+    # The Ruby names an Entry answers to, shortest first: ["server", "get_server"].
+    def ruby_names_for(entry)
+      member = member(entry) or return []
+      parent = entry.path[0...-1]
+      candidates = [Api.underscore(member.name)]
+      candidates += Api.ruby_names(member.name, returns_boolean: member.returns == "boolean") if member.method?
+      candidates.uniq.select { resolve(parent, _1)&.path == entry.path }.sort_by(&:size)
+    end
+
+    # How a script would call an Entry: "ns.cloud.server_names".
+    def ruby_call(entry)
+      namespaces = entry.path[0...-1].map { Api.underscore(_1) }
+      ["ns", *namespaces, ruby_names_for(entry).first || Api.underscore(entry.path.last)].join(".")
+    end
+
+    # The fields of an options object (BasicHGWOptions, say), which a Ruby
+    # script passes as keyword arguments. nil unless type names an interface
+    # made only of plain fields.
+    def options(type)
+      interface = @interfaces[type.to_s.gsub(/\s*\|\s*(?:undefined|null)\b/, "").strip] or return nil
+      fields = members_of(interface).values
+      fields unless fields.empty? || fields.any?(&:method?)
+    end
+
     # The Ruby names a function answers to, preferred first.
     def self.ruby_names(name, returns_boolean:)
       snake = underscore(name)
@@ -154,7 +207,9 @@ module Afterburner
   # scanner is enough; no TypeScript parser needed.
   class DefinitionsParser
     Interface = Struct.new(:name, :parents, :members)
-    Member = Data.define(:name, :method, :type, :returns, :ram) do
+    # doc is the member's JSDoc block as written; signature is the whole
+    # declaration on one line. AB.doc shows both.
+    Member = Data.define(:name, :method, :type, :returns, :ram, :doc, :signature) do
       def method? = self.method
     end
 
@@ -188,25 +243,26 @@ module Afterburner
     def parse_members(index, interface, indent, found)
       closing = /\A#{indent.delete_suffix('  ')}\};?\s*\z/
       member_line = /\A#{indent}(?:readonly )?(\w+)\??(\(|<|: )/
-      ram = nil
+      ram = doc = nil
       while index < @lines.size
         line = @lines[index]
         return index if closing.match?(line)
 
         if line.start_with?("#{indent}/**")
-          index, ram = read_doc(index)
+          index, ram, doc = read_doc(index)
         elsif (match = member_line.match(line))
           name, opener = match.captures
           if opener == ": " && line.end_with?("{")
             inline = Interface.new("#{interface.name}.#{name}", [], {})
             index = parse_members(index + 1, inline, "#{indent}  ", found)
             found[inline.name] = inline
-            interface.members[name] = Member.new(name:, method: false, type: inline.name, returns: nil, ram: nil)
+            interface.members[name] = Member.new(name:, method: false, type: inline.name, returns: nil, ram: nil, doc:,
+                                                 signature: nil)
           else
             index, signature = read_signature(index)
-            interface.members[name] ||= member_from(name, opener, signature, ram)
+            interface.members[name] ||= member_from(name, opener, signature, ram, doc)
           end
-          ram = nil
+          ram = doc = nil
         end
         index += 1
       end
@@ -215,10 +271,11 @@ module Afterburner
 
     def read_doc(index)
       ram = nil
+      start = index
       loop do
         line = @lines[index]
         ram = Float(Regexp.last_match(1)) if line =~ /RAM cost: ([\d.]+)/
-        return [index, ram] if line.include?("*/")
+        return [index, ram, @lines[start..index].join("\n")] if line.include?("*/")
 
         index += 1
       end
@@ -239,13 +296,13 @@ module Afterburner
       end
     end
 
-    def member_from(name, opener, signature, ram)
+    def member_from(name, opener, signature, ram, doc)
       if opener == ": "
         type = signature.sub(/\A(?:readonly )?\w+\??: /, "").delete_suffix(";").strip
-        Member.new(name:, method: false, type:, returns: nil, ram: nil)
+        Member.new(name:, method: false, type:, returns: nil, ram: nil, doc:, signature: nil)
       else
         returns = signature[/\)\s*:\s*([^;]+);\z/, 1]&.strip
-        Member.new(name:, method: true, type: nil, returns:, ram:)
+        Member.new(name:, method: true, type: nil, returns:, ram:, doc:, signature:)
       end
     end
   end

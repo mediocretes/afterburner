@@ -88,6 +88,16 @@ ns.getServerMaxMoney("n00dles")           # the JavaScript names work too
 Functions that act and report whether it worked (`nuke`, `scp`, `kill`) keep plain names. A typo raises
 `NoMethodError` with suggestions.
 
+**`AB`** holds afterburner's own tools, kept out of `ns` so that `ns` has only the game's functions. It works
+in scripts and in the console, where it's most useful:
+
+```ruby
+AB.functions(/server/)   # matching functions: Ruby name, RAM, JavaScript name
+AB.doc(:hack)            # the Ruby call, its keyword options, the signature, and the game's docs
+AB.doc("cloud")          # a namespace's functions
+ns.methods               # every Ruby name ns answers to; in the console, ns.<Tab> completes them
+```
+
 **Game objects** come back as records with snake_case readers:
 
 ```ruby
@@ -140,7 +150,7 @@ any `ns` call in progress (a `hack`, say) to finish. `--no-reload` turns it off.
 | | |
 |---|---|
 | `afterburner watch` | Serve the game: sync files, run Ruby scripts. Leave it running. |
-| `afterburner console [--ram GB]` | IRB with `ns` live in the game. It pushes `afterburner/console.js`, which claims `--ram` GB (default 4); run that in the game and type away. The game charges each new function you call against the claim. |
+| `afterburner console [--ram GB]` | IRB with `ns` live in the game. It pushes `afterburner/console.js`, which claims `--ram` GB (default 4); run that in the game and type away. The game charges each new function you call against the claim. `ns.<Tab>` completes, and `AB.doc(:name)` shows a function's docs. |
 | `afterburner save [FILE]` | Download the game's live save, as the in-game export would. |
 | `afterburner ram FILE...` | RAM a script needs: `.rb` files are scanned locally, with a breakdown; anything else is the game's own figure. |
 | `afterburner stub FILE.rb` | Print the JavaScript stub the game runs for a script. |
