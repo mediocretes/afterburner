@@ -105,7 +105,12 @@ the RAM scanner both use it, so anything a script can call is something it's cha
 - `Record` wraps game objects: snake_case readers, `?` predicates (dropping `has`/`is`), `[]`, `to_h`, pattern
   matching. Sent back to the game as the original object.
 - Each run is `load(path, fresh_module)`, so scripts' constants and methods don't leak into each other. The
-  module provides `ns`, `ARGV`, `logger`, `NetscriptError`, and per-script `at_exit`, `abort`, `exit`. It
+  module provides `ARGV`, `NetscriptError`, and per-script `at_exit`, `abort`, `exit`.
+- `ns` and `logger` are private `Kernel` methods (`ScriptAccess`) that look up the running script's session in
+  fiber-local storage, as `$stdout` routing does, so they work anywhere in a script's code: libraries, its
+  classes, methods added to `Numeric`. Async tasks a script starts inherit the storage; a `Thread` doesn't, and
+  outside a script they raise a `NameError` saying so. The console sets the same storage, so `ns` works inside
+  classes defined at its prompt. The RAM scan already charges a bare `ns` in any file it reaches. It
   also holds every top-level class and module (Ruby's, and libraries'): a class definition looks only in the
   module it's in, so without them `class Float` in a script would make a new `Float` in the script's module
   and a monkeypatch would silently do nothing. A class a script defines itself stays in its module.

@@ -103,6 +103,18 @@ in { money_max: 0 } then logger.info "nothing to take"
 end
 ```
 
+**`ns` and `logger` work anywhere in your code** while the script runs: in libraries, in your own classes, in
+methods you add to Ruby's:
+
+```ruby
+# src/lib/formatting.rb
+class Numeric
+  def to_pct = ns.format.percent(self)
+end
+```
+
+Each running script gets its own `ns`, even when several share a library.
+
 **Output:** `puts`, `print`, `p`, and `warn` go to the game's terminal, from anywhere in your code. `logger`
 writes to the script's log window (`ns.ui.open_tail` shows it).
 

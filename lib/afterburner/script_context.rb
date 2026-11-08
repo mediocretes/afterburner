@@ -7,15 +7,11 @@ module Afterburner
   # constants and methods a script defines don't leak into other scripts.
   module ScriptContext
     def self.build(session)
-      ns = session.ns
-      logger = session.logger
       shared = top_level_modules
       Module.new do
         shared.each { |name, value| const_set(name, value) }
         const_set(:ARGV, session.args.dup.freeze)
         const_set(:NetscriptError, Afterburner::NetscriptError)
-        define_method(:ns) { ns }
-        define_method(:logger) { logger }
         define_method(:at_exit) { |&block| session.at_exit(&block) }
         define_method(:abort) { |message = "aborted"| raise ScriptAbort, message }
         define_method(:exit!) { |*| raise SystemExit }
@@ -42,6 +38,24 @@ module Afterburner
       $VERBOSE = verbose
     end
   end
+
+  # `ns` and `logger` anywhere in a running script's code: the script itself,
+  # its libraries, its classes, a method it adds to Numeric. Each script gets
+  # its own, found through the fiber it runs in, which is also how `puts` finds
+  # the right terminal; tasks a script starts inherit it. Outside a running
+  # script (and in a Thread a script starts) there's no game to talk to.
+  module ScriptAccess
+    private
+
+    def ns = Afterburner::ScriptAccess.current(:ns).ns
+    def logger = Afterburner::ScriptAccess.current(:logger).logger
+
+    def self.current(name)
+      Fiber[:afterburner_session] or
+        raise NameError.new("`#{name}` is only available while a Ruby script is running in the game", name)
+    end
+  end
+  ::Kernel.include(ScriptAccess)
 
   # Stands in for $stdout and $stderr while afterburner serves. Writes from
   # inside a script go to that script's terminal output in the game; writes
