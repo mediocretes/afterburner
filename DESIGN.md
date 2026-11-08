@@ -186,7 +186,8 @@ exact call that exceeds its claim (verified). So a stub's claim must be exact: t
 killed, too high wastes RAM.
 
 **Scan** (`ram_scanner.rb`, Prism): charges calls whose receiver chain starts at `ns`, `@ns`, a local or method
-named `ns`, or a variable assigned a namespace or `ns` itself; plus `ns.public_send(:name, ...)` with a literal.
+named `ns`, or a variable assigned a namespace or `ns` itself; plus `ns.public_send(:name, ...)` (or `send`,
+`__send__`) with a literal. `NS` defines `public_send` and `send` itself, since `BasicObject` has only `__send__`.
 Follows `require_relative`. Calls on results (`ns.server(t).money_max`) aren't charged. Names that don't
 resolve are logged ("ns.hakc isn't a Netscript function"). A call the scan can't see gets the script killed by
 the game, and the proxy appends a hint.

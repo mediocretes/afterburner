@@ -189,8 +189,9 @@ does for JavaScript, by reading the source (with [Prism](https://github.com/ruby
 through `ns`, `@ns`, or a variable holding a namespace (`hacknet = ns.hacknet`), and follows `require_relative`.
 `afterburner ram src/scout.rb` shows the breakdown.
 
-A call it can't see (a name built at runtime, say) isn't charged, and the game stops the script when it makes
-that call, with a note explaining why.
+To call a function chosen by name, use `ns.public_send(:brutessh, host)` (or `send`) with a literal symbol, which
+is charged. A call it can't see (a name in a variable or built at runtime, say) isn't charged, and the game stops
+the script when it makes that call, with a note explaining why.
 
 The game's documentation is a little off for some functions whose cost depends on your progress. So when a
 script starts, afterburner also asks the game what each function actually costs (that's free), caches the
