@@ -181,6 +181,10 @@ the same browser can't drive it); runs only `.rb` files under `src/`, by plain r
 code the game sends. The console, `save`, and `ram` refuse browser connections entirely. It's not a sandbox for the
 Ruby you write: that's your code, on your machine.
 
+One thing it can't stop: any script in the game can start any of your Ruby scripts, with arguments of its
+choosing, because a stub is just a file that anything in the game can write. Only code already in `src/` ever
+runs, but if a script touches your machine beyond `ns` (writing files, the network), treat `ARGV` as untrusted.
+
 ## Platforms
 
 - **Web build, in Chrome**: tested. Needs the local network permission.
