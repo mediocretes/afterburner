@@ -89,7 +89,8 @@ when "watch"
     out.puts
   end
 when "console"
-  exit Afterburner::Console.new(port: config.port, ram: console_ram, definitions: config.definitions).run ? 0 : 1
+  console = Afterburner::Console.new(port: config.port, ram: console_ram, definitions: config.definitions, src: config.src)
+  exit console.run ? 0 : 1
 when "save"
   response = ask.call("/save")
   abort response.body unless response.is_a?(Net::HTTPSuccess)

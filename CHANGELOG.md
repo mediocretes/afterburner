@@ -33,3 +33,5 @@ First version.
 - Fixed: `ns.public_send(:name, ...)` and `ns.send` raised `NoMethodError`, though the RAM scan charged them.
 - Fixed: Ruby's "already initialized constant" warnings reached a script's terminal when a library was loaded
   again, as after a reload that failed.
+- Fixed: `require_relative` at the console prompt looked in afterburner's own folder. It now resolves against
+  the scripts folder, so `require_relative 'lib/server'` works there as it does in a script.
