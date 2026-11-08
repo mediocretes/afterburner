@@ -36,6 +36,7 @@ module Afterburner
     # Fewer functions than this in the definitions means the parser has
     # probably fallen behind a change in the file's format.
     EXPECTED_FUNCTIONS = 300
+    DEFINITIONS_PATIENCE = 30
 
     def initialize(config, log:)
       @config = config
@@ -123,6 +124,7 @@ module Afterburner
     def handle(request)
       uri = URI(request.path)
       origin = request.headers["origin"]&.to_s
+      @log.debug { "#{request.method} #{uri.path} from origin #{origin.inspect}" }
       case uri.path
       when "/" then websocket(request, allowed_origin?(origin), origin) { attach_game(_1) }
       when "/script" then websocket(request, allowed_origin?(origin), origin) { run_script(_1) }
@@ -182,6 +184,11 @@ module Afterburner
     def run_script(connection)
       start = read_json(connection) or return
       return attach_console_stub(connection, start) if start["script"] == Stubs::CONSOLE_SCRIPT
+
+      # Right after a save loads, scripts can start before the game's Remote
+      # API has reconnected and sent its definitions; give it a moment.
+      deadline = Time.now + DEFINITIONS_PATIENCE
+      sleep TICK until File.exist?(@config.definitions) || Time.now > deadline
       unless File.exist?(@config.definitions)
         return say(connection, op: "fail", message: "afterburner doesn't have the game's definitions yet. " \
                                                     "Reconnect under Options → Remote API, then run this again.")

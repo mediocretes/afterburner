@@ -12,3 +12,4 @@ First version.
   reloads it and restarts the scripts that use it.
 - `afterburner console`, `save`, `ram`, and `stub`.
 - `--verbose`, `--origin`, and `--no-reload`.
+- Scripts restarted by a loading save wait for afterburner rather than failing.

@@ -26,6 +26,9 @@ const DEFINITIONS = path.join(WORK, "NetscriptDefinitions.d.ts");
 const COSTS = path.join(WORK, "ram-costs.json");
 const FLAGS = ["--port", String(PORT), "--src", SRC, "--dist", DIST, "--definitions", DEFINITIONS, "--costs", COSTS];
 
+// bundle is a .bat on Windows, which spawn only runs through a shell.
+const SHELL = process.platform === "win32";
+
 const results = [];
 const watchLog = [];
 let watcher;
@@ -36,7 +39,7 @@ function step(message) {
 }
 
 function afterburner(args, { input } = {}) {
-  const child = spawn("bundle", ["exec", "exe/afterburner", ...args, ...FLAGS], { cwd: ROOT });
+  const child = spawn("bundle", ["exec", "exe/afterburner", ...args, ...FLAGS], { cwd: ROOT, shell: SHELL });
   const output = [];
   const collect = (chunk) => output.push(String(chunk));
   child.stdout.on("data", collect);
@@ -58,11 +61,15 @@ async function waitUntil(test, timeout, what) {
 
 const logged = (pattern) => watchLog.find((line) => pattern.test(line));
 
-function startWatching() {
-  step(`starting afterburner watch on ${PORT}`);
+function setUp() {
   fs.cpSync(path.join(ROOT, "test/e2e/dist"), DIST, { recursive: true });
   fs.cpSync(FIXTURES, SRC, { recursive: true });
-  watcher = spawn("bundle", ["exec", "exe/afterburner", "watch", ...FLAGS], { cwd: ROOT });
+}
+
+function startWatching() {
+  step(`starting afterburner watch on ${PORT}`);
+  const started = watchLog.filter((line) => /listening on/.test(line)).length;
+  watcher = spawn("bundle", ["exec", "exe/afterburner", "watch", ...FLAGS], { cwd: ROOT, shell: SHELL });
   const collect = (chunk) => {
     for (const line of String(chunk).split("\n").filter(Boolean)) {
       watchLog.push(line);
@@ -71,7 +78,7 @@ function startWatching() {
   };
   watcher.stdout.on("data", collect);
   watcher.stderr.on("data", collect);
-  return waitUntil(() => logged(/listening on/), 15000, "afterburner to start");
+  return waitUntil(() => watchLog.filter((line) => /listening on/.test(line)).length > started, 15000, "afterburner to start");
 }
 
 async function openGame() {
@@ -84,6 +91,7 @@ async function openGame() {
   await page.getByText("Options", { exact: true }).first().click();
   await page.getByText("Remote API", { exact: true }).first().click();
   await page.locator("input[type=text]").nth(1).fill(String(PORT));
+  await page.locator("input[type=text]").nth(2).fill("1"); // reconnection delay, as the README suggests
   await page.getByRole("button", { name: "Connect" }).click();
   await waitUntil(() => logged(/greet\.rb → greet\.js/), 30000, "the stubs to reach the game");
   step("connected; stubs pushed");
@@ -138,10 +146,9 @@ async function localRam(file) {
 
 // ramcheck.js compares every documented cost with what the game charges.
 async function writeRamcheck() {
-  const ruby = spawn("bundle", [
-    "exec", "ruby", "-Ilib", "-rjson", "-rafterburner", "-e",
-    `puts JSON.generate(Afterburner::Api.load(${JSON.stringify(DEFINITIONS)}).functions.to_h { [_1.qualified_name, _1.ram || 0] })`,
-  ], { cwd: ROOT });
+  const lister = path.join(WORK, "documented_costs.rb");
+  fs.writeFileSync(lister, `require "json"\nrequire "afterburner"\nputs JSON.generate(Afterburner::Api.load(ARGV[0]).functions.to_h { [_1.qualified_name, _1.ram || 0] })\n`);
+  const ruby = spawn("bundle", ["exec", "ruby", "-Ilib", lister, DEFINITIONS], { cwd: ROOT, shell: SHELL });
   let costs = "";
   ruby.stdout.on("data", (chunk) => (costs += chunk));
   await new Promise((resolve) => ruby.on("close", resolve));
@@ -162,6 +169,7 @@ export async function main(ns) {
 }
 
 async function main() {
+  setUp();
   await startWatching();
   const page = await openGame();
 
@@ -276,6 +284,15 @@ async function main() {
     const { code, output } = await console_.done;
     if (code !== 0 || !/level=\d+/.test(output)) throw new Error(`exit ${code}:\n${output}`);
     return output.match(/level=\d+/)[0];
+  });
+
+  await check("a stub started while afterburner is down waits for it", async () => {
+    watcher.kill();
+    await new Promise((resolve) => watcher.on("close", resolve));
+    await expectOutput(page, "run greet.js later", /Running script/);
+    await new Promise((r) => setTimeout(r, 3000)); // the game restarting scripts before afterburner is back
+    await startWatching();
+    await waitUntil(async () => (await screen(page)).includes("Hello, later!"), 20000, "the waiting stub to run");
   });
 
   await page.screenshot({ path: path.join(WORK, "final.png") });

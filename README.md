@@ -147,9 +147,9 @@ Ruby you write: that's your code, on your machine.
 ## Platforms
 
 - **Web build, in Chrome**: tested. Needs the local network permission.
-- **Steam build**: should work, with no permission needed, but not tested yet. If afterburner logs
+- **Steam build**: tested on macOS. No permission needed. If afterburner ever logs
   `refused a connection from …`, please open an issue with that origin.
-- **Windows**: nothing is deliberately Unix-only (pure Ruby, polling file watch), but it's untested.
+- **Windows**: the unit tests pass there in CI; not yet tried against the game.
 
 ## Limits
 
@@ -158,7 +158,8 @@ Ruby you write: that's your code, on your machine.
 - One game at a time: a second game connecting (another browser tab, say) takes over from the first.
 - A game object's field whose name is also a Ruby method (`hash`, `class`, `display`) has to be read as
   `record[:hash]`.
-- Reloading the game stops all running Ruby scripts.
+- Reloading the game stops all running Ruby scripts. When a save loads, the game restarts them, and each one
+  waits up to a minute for afterburner to be running.
 - Functions that take callbacks or return objects with methods (`ns.get_port_handle`, React-node printers) don't
   cross over, except `ns.at_exit { }`, which runs in Ruby.
 - Each running Ruby script holds one WebSocket. That's fine for scripts that make decisions; workers you run at

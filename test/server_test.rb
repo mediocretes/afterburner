@@ -262,6 +262,27 @@ class ServerTest < Minitest::Test
     assert_equal({ "a" => ["a a"], "b" => ["b b"] }, printed)
   end
 
+  def test_a_script_started_before_the_definitions_arrive_waits_for_them
+    final = nil
+    serve(files: { "src/early.rb" => "puts 'ran'" }, definitions: false) do |dir, _log|
+      Async do
+        sleep 0.6 # the game's Remote API reconnecting after a load
+        File.write(File.join(dir, "NetscriptDefinitions.d.ts"), FIXTURE_DEFINITIONS)
+      end
+      connect("/script") do |connection|
+        transmit(connection, op: "start", script: "early.rb", args: [], pid: 1, ram: 1.6)
+        while (message = receive(connection))
+          case message["op"]
+          when "costs" then transmit(connection, op: "costs", costs: {})
+          when "call" then transmit(connection, op: "result", id: message["id"], value: nil)
+          else break final = message
+          end
+        end
+      end
+    end
+    assert_equal "exit", final["op"]
+  end
+
   def test_refuses_names_outside_the_scripts_or_in_lib
     ["../outside.rb", "/etc/passwd", "lib/helper.rb", "missing.rb"].each do |name|
       played = play("puts 1", files: { "lib/helper.rb" => "" }, start: { op: "start", script: name, args: [], pid: 1 })
