@@ -2,6 +2,10 @@
 
 # afterburner: write Bitburner scripts in Ruby. See README.md and DESIGN.md.
 module Afterburner
+  # Reads a text file as UTF-8 whatever the locale says. Started without LANG
+  # (from a launcher, a scheduler, an editor), Ruby assumes US-ASCII, and the
+  # game's definitions file isn't ASCII.
+  def self.read_text(path) = File.read(path, encoding: Encoding::UTF_8)
 end
 
 require_relative "afterburner/version"

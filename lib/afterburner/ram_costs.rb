@@ -28,7 +28,7 @@ module Afterburner
       return @loaded if mtime == @loaded_mtime && @loaded
 
       @loaded_mtime = mtime
-      @loaded = mtime ? JSON.parse(File.read(@path)) : {}
+      @loaded = mtime ? JSON.parse(Afterburner.read_text(@path)) : {}
     rescue JSON::ParserError
       @loaded = {}
     end

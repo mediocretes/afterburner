@@ -172,7 +172,7 @@ module Afterburner
     # every file, the proxy, and every stub.
     def sync_everything(link)
       definitions = link.definitions
-      unless File.exist?(@config.definitions) && File.read(@config.definitions) == definitions
+      unless File.exist?(@config.definitions) && Afterburner.read_text(@config.definitions) == definitions
         FileUtils.mkdir_p(File.dirname(@config.definitions))
         File.write(@config.definitions, definitions)
         @log.info("saved the game's #{File.basename(@config.definitions)}")
