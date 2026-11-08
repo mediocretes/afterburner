@@ -13,6 +13,15 @@ FIXTURE_DEFINITIONS = <<~TS
     hasAdminRights: boolean;
   }
 
+  interface BasicHGWOptions {
+    /** Number of threads to use.
+     * At most the script's own.
+     */
+    threads?: number;
+    /** Wait this much longer. */
+    additionalMsec?: number;
+  }
+
   interface Hacknet {
     /**
      * Number of nodes.
@@ -63,6 +72,9 @@ FIXTURE_DEFINITIONS = <<~TS
      * Steal money.
      * @remarks
      * RAM cost: 0.1 GB
+     *
+     * See {@link NS.getServer | getServer} and {@link Hacknet.numNodes}.
+     * @param host - The target.
      */
     hack(host?: string, opts?: BasicHGWOptions): Promise<number>;
 

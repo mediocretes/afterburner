@@ -43,8 +43,13 @@ module Afterburner
     end
 
     def respond_to?(name, _include_all = false)
-      %i[inspect to_s respond_to?].include?(name.to_sym) || !@api.resolve(@path, name).nil?
+      %i[inspect to_s respond_to? methods].include?(name.to_sym) || !@api.resolve(@path, name).nil?
     end
+
+    # The Ruby names this answers to: functions, namespaces, and properties,
+    # with the short aliases but not the JavaScript names. IRB's tab completion
+    # asks for these. AB.functions and AB.doc say more.
+    def methods(_regular = true) = @api.names_at(@path).map(&:to_sym)
 
     def inspect = "#<NS #{['ns', *@path].join('.')}>"
     alias to_s inspect

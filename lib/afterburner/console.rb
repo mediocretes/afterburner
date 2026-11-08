@@ -30,7 +30,8 @@ module Afterburner
       connect
       return false unless attached?
 
-      start_irb(NS.new(self, Api.load(@definitions)))
+      @api = Api.load(@definitions)
+      start_irb(NS.new(self, @api))
       true
     ensure
       @requests&.push(nil)
@@ -60,7 +61,7 @@ module Afterburner
 
     def at_exit(&) = raise(ArgumentError, "at_exit is for scripts, not the console")
 
-    attr_reader :ns
+    attr_reader :ns, :api
 
     def logger = @logger ||= Logger.new(@out, formatter: ->(_severity, _time, _program, message) { "#{message}\n" })
 
@@ -137,6 +138,9 @@ module Afterburner
       Fiber[:afterburner_session] = self
       context = Object.new
       context.define_singleton_method(:inspect) { "afterburner" }
+      # This binding sees start_irb's locals, so `ns` is a local at the prompt
+      # too. That matters: IRB only tab-completes after a variable or a
+      # constant, and `ns.<Tab>` lists ns.methods.
       context.instance_eval { binding }.irb(show_code: false)
     end
   end
