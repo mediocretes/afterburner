@@ -24,3 +24,9 @@ First version.
 - `AB`, for afterburner's own tools: `AB.functions(pattern)` lists functions with their RAM costs, and
   `AB.doc(name)` shows a function's Ruby call, keyword options, signature, and the game's docs.
 - `ns.methods` lists the Ruby names `ns` answers to, and `ns.<Tab>` completes them in the console.
+- The console's prompt is a script's top level, so code behaves there as it would in a script. afterburner's
+  own classes no longer show through: `Server` at the prompt was afterburner's Remote API server.
+- The console claims 80% of the RAM free on the server you run it on, worked out in the game when it starts;
+  `--ram` takes a percentage or GB. It says what the game granted, including when that's less than asked.
+- Records have `keys`, the snake_case field names, and their `methods` include the field readers, so
+  `server.<Tab>` completes fields in the console.

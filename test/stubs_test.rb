@@ -101,9 +101,30 @@ class StubsTest < Minitest::Test
     assert_equal ["farm.js"], @link.deleted
   end
 
-  def test_console_stub
-    content = stubs.console_source(8.0)
+  def test_console_stub_claiming_gb
+    content = stubs.console_source(Afterburner::ConsoleClaim.parse("8"))
     assert_includes content, "ns.ramOverride(8.0);"
     assert_includes content, '"@console"'
+    assert_includes content, "// RAM: 8 GB"
+  end
+
+  def test_console_stub_claiming_a_share_of_free_ram
+    content = stubs.console_source(Afterburner::ConsoleClaim.parse("80%"))
+    assert_includes content, "ns.getServerMaxRam() - ns.getServerUsedRam() + ns.ramOverride()"
+    assert_includes content, "* 0.8 * 100) / 100"
+    assert_includes content, "Math.max(ns.ramOverride(),"
+    assert_includes content, "// RAM: 80% of the free RAM where it runs"
+    assert_includes content, ", claim);"
+  end
+
+  def test_console_claims
+    assert_equal 8.0, Afterburner::ConsoleClaim.parse("8").gb
+    assert_equal 2.5, Afterburner::ConsoleClaim.parse(" 2.5 ").gb
+    assert_equal 80.0, Afterburner::ConsoleClaim.parse("80%").percent
+    assert_equal 50.0, Afterburner::ConsoleClaim.parse("50 %").percent
+    assert_equal "80% of the free RAM where it runs", Afterburner::ConsoleClaim.parse(Afterburner::ConsoleClaim::DEFAULT).to_s
+    %w[1 0% 101% lots -5%].each do |text|
+      assert_raises(ArgumentError, text) { Afterburner::ConsoleClaim.parse(text) }
+    end
   end
 end

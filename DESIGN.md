@@ -80,9 +80,12 @@ non-function (`["enums"]`) reads the property. JSON can't carry `Infinity` or `N
 `{"$num": "Infinity"}`. `fail` makes the stub throw, so the game shows its usual error dialog, with the Ruby
 message and backtrace.
 
-**Console** (`/console`): `afterburner console` connects with `?ram=GB`. afterburner pushes
-`afterburner/console.js`, a stub with that claim whose script is the special name `@console`, and sends
-`status` messages until it's run. Then it relays: `call` frames from the console to the stub, `result`/`error`
+**Console** (`/console`): `afterburner console` connects with `?ram=`, GB or a percentage (default `80%`).
+afterburner pushes `afterburner/console.js`, a stub with that claim whose script is the special name `@console`,
+and sends `status` messages until it's run. A percentage is worked out by the stub, since only the game knows
+the server it runs on: `getServerMaxRam() - getServerUsedRam()` plus what it already holds, times the share, and
+never less than it holds (0.1 GB of the claim pays for those two calls). The stub's `start` carries what
+`ramOverride` granted, and the console reports that, saying so when it's less than a GB `--ram` asked for. Then it relays: `call` frames from the console to the stub, `result`/`error`
 back. Leaving the console sends the stub `exit`; the stub stopping sends the console `ended`. On the console
 side, IRB runs on the main thread and the WebSocket in a background thread's reactor, talking through queues.
 
@@ -103,14 +106,15 @@ the RAM scanner both use it, so anything a script can call is something it's cha
 - Keyword arguments become the trailing options object, keys camelCased.
 - `NS` is a `BasicObject`, so names like `print`, `format`, and `sleep` reach the game rather than `Kernel`.
   Besides the game's names it answers only Ruby's reflection protocol (`inspect`, `respond_to?`, and `methods`,
-  which lists the Ruby names so IRB can tab-complete them). IRB only completes after a variable or a constant;
-  `ns` is one at the console prompt because the prompt's binding is made inside `Console#start_irb(ns)`.
+  which lists the Ruby names so IRB can tab-complete them). IRB only completes after a variable or a constant,
+  so the console prompt also has `ns` as a local.
 - `AB` holds afterburner's own tools (`AB.functions`, `AB.doc`), so they never collide with a game function. It
   finds the API through the same fiber-local session as `ns`. Docs come from the definitions file: the parser
   keeps each member's JSDoc and signature, and `AB::Docs` renders them with Ruby names. An options object as the
   last parameter shows as `**opts` with its fields listed as keywords.
-- `Record` wraps game objects: snake_case readers, `?` predicates (dropping `has`/`is`), `[]`, `to_h`, pattern
-  matching. Sent back to the game as the original object.
+- `Record` wraps game objects: snake_case readers, `?` predicates (dropping `has`/`is`), `[]`, `keys`, `to_h`,
+  pattern matching. `methods` adds the readers (and predicates for yes/no fields) so IRB completes them. Sent
+  back to the game as the original object.
 - Each run is `load(path, fresh_module)`, so scripts' constants and methods don't leak into each other. The
   module provides `ARGV`, `NetscriptError`, and per-script `at_exit`, `abort`, `exit`.
 - `ns` and `logger` are private `Kernel` methods (`ScriptAccess`) that look up the running script's session in
@@ -121,6 +125,11 @@ the RAM scanner both use it, so anything a script can call is something it's cha
   also holds every top-level class and module (Ruby's, and libraries'): a class definition looks only in the
   module it's in, so without them `class Float` in a script would make a new `Float` in the script's module
   and a monkeypatch would silently do nothing. A class a script defines itself stays in its module.
+- The console's prompt is a script's top level. `Console#prompt_binding` loads `console_prompt.rb` wrapped in a
+  fresh `ScriptContext` module, as a script is loaded, and IRB runs on the binding that file leaves behind. So
+  what works at the prompt works in a script: the same constants (afterburner's own `Server` and `Record` are
+  out of sight), `ARGV`, top-level methods kept in the module, and `class Float` reopening the real one. Only
+  `ns` differs, as a local rather than a method, for tab completion; it's the same object.
 - `$stdout`/`$stderr` are replaced (in `watch`) by an object that routes writes by fiber-local storage: inside a
   script they go to its terminal (`ns.tprint`), elsewhere to the real stream. So `puts` works from classes and
   gems too. `logger` writes to `ns.print`.
@@ -220,6 +229,7 @@ It is not a sandbox for the Ruby you write.
 | `lib/afterburner/session.rb` | one running script, its protocol, hot reload |
 | `lib/afterburner/script_context.rb` | what a script sees at top level; routing `puts` to the game |
 | `lib/afterburner/console.rb` | the IRB side of `afterburner console` |
+| `lib/afterburner/console_prompt.rb` | loaded like a script to make the console prompt's binding |
 | `lib/afterburner/api.rb` | definitions parser, name resolution, documented costs |
 | `lib/afterburner/ns.rb` | the `ns` proxy, `NetscriptError` |
 | `lib/afterburner/ab.rb` | `AB`: `AB.functions`, `AB.doc`, and rendering the docs |

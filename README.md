@@ -105,6 +105,7 @@ server = ns.server("n00dles")
 server.money_max          # moneyMax
 server.admin_rights?      # hasAdminRights
 server[:money_max]        # same thing
+server.keys               # [:hostname, :ip, ..., :money_max, ...]; in the console, server.<Tab> completes them
 server.to_h               # { hostname: "n00dles", money_max: 1750000, ... }
 
 case server
@@ -150,7 +151,7 @@ any `ns` call in progress (a `hack`, say) to finish. `--no-reload` turns it off.
 | | |
 |---|---|
 | `afterburner watch` | Serve the game: sync files, run Ruby scripts. Leave it running. |
-| `afterburner console [--ram GB]` | IRB with `ns` live in the game. It pushes `afterburner/console.js`, which claims `--ram` GB (default 4); run that in the game and type away. The game charges each new function you call against the claim. `ns.<Tab>` completes, and `AB.doc(:name)` shows a function's docs. |
+| `afterburner console [--ram AMOUNT]` | IRB with `ns` live in the game. It pushes `afterburner/console.js`; run that in the game and type away. It claims 80% of the RAM free on the server you run it on, or what `--ram` says: GB (`--ram 8`) or another share (`--ram 50%`). The game charges each new function you call against the claim. `ns.<Tab>` completes, and `AB.doc(:name)` shows a function's docs. |
 | `afterburner save [FILE]` | Download the game's live save, as the in-game export would. |
 | `afterburner ram FILE...` | RAM a script needs: `.rb` files are scanned locally, with a breakdown; anything else is the game's own figure. |
 | `afterburner stub FILE.rb` | Print the JavaScript stub the game runs for a script. |

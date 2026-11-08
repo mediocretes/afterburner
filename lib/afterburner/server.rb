@@ -241,8 +241,11 @@ module Afterburner
     def console(client, ram)
       return say(client, op: "error", message: "Another console is already open.") if @console
 
-      claim = Float(ram || 4)
-      return say(client, op: "error", message: "--ram must be at least #{Api::BASE_RAM}") if claim < Api::BASE_RAM
+      begin
+        claim = ConsoleClaim.parse(ram || ConsoleClaim::DEFAULT)
+      rescue ArgumentError => e
+        return say(client, op: "error", message: e.message)
+      end
 
       @console = Async::Variable.new
       waiting = Async { wait_for_console_stub(client, claim) }
@@ -256,11 +259,12 @@ module Afterburner
       left.stop
       return unless stub
 
-      @log.info("console attached to pid #{start['pid']} (#{claim} GB)")
-      say(client, op: "attached", pid: start["pid"], ram: claim)
+      granted = start["ram"] || claim.gb
+      @log.info("console attached to pid #{start['pid']} (#{granted} GB)")
+      # The game rounds RAM to hundredths of a GB.
+      short = claim.gb && granted && granted < claim.gb.round(2) - 1e-9
+      say(client, op: "attached", pid: start["pid"], ram: granted, short:)
       relay(client, stub)
-    rescue ArgumentError
-      say(client, op: "error", message: "--ram must be a number of GB")
     ensure
       done&.resolve(true)
       @console = nil
@@ -274,7 +278,7 @@ module Afterburner
         sleep TICK
       end
       link.push_file(Stubs::CONSOLE, @stubs.console_source(claim))
-      say(client, op: "status", message: "In the game, run: run #{Stubs::CONSOLE} (it claims #{claim} GB; change that with --ram)")
+      say(client, op: "status", message: "In the game, run: run #{Stubs::CONSOLE} (it claims #{claim}; change that with --ram)")
       @console.wait
     rescue GameLink::Error => e
       say(client, op: "error", message: e.message)

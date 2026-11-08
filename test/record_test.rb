@@ -65,4 +65,19 @@ class RecordTest < Minitest::Test
   def test_blocks_cant_cross
     assert_raises(ArgumentError) { Afterburner::Codec.encode([-> {}]) }
   end
+
+  def test_keys_are_the_snake_case_fields
+    assert_equal %i[hostname money_max has_admin_rights backdoor_installed cpu_cores nested ports], server.keys
+    assert_equal server.to_h.keys, server.keys
+  end
+
+  def test_methods_include_the_readers_so_irb_completes_them
+    methods = server.methods
+    assert_includes methods, :money_max
+    assert_includes methods, :admin_rights?
+    assert_includes methods, :backdoor_installed?
+    refute_includes methods, :money_max?
+    assert_includes methods, :to_h
+    assert_equal methods.uniq, methods
+  end
 end

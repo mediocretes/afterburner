@@ -10,6 +10,7 @@ module Afterburner
   #   server.money_max         # moneyMax
   #   server.admin_rights?     # hasAdminRights
   #   server[:money_max]       # same as server.money_max
+  #   server.keys              # [:hostname, :ip, ..., :money_max, ...]
   #   server.to_h              # { hostname: "n00dles", money_max: 1750000, ... }
   #
   #   case ns.server(host)
@@ -31,6 +32,19 @@ module Afterburner
     end
 
     def key?(name) = @raw.key?(name.to_s) || @keys.key?(name.to_s)
+
+    # The fields' snake_case names, as to_h has them.
+    def keys = @keys.keys.map(&:to_sym)
+
+    # Ruby's methods plus the field readers, so IRB tab-completes fields. A
+    # yes/no field also lists its predicate, without has_ or is_:
+    # admin_rights? for hasAdminRights.
+    def methods(regular = true)
+      readers = @keys.flat_map do |snake, key|
+        [true, false].include?(@raw[key]) ? [snake, "#{snake.sub(/\A(?:has|is)_/, '')}?"] : [snake]
+      end
+      (readers.map(&:to_sym) + super).uniq
+    end
 
     def to_h
       @keys.to_h { |snake, key| [snake.to_sym, deep_to_h(Codec.decode(@raw[key]))] }
