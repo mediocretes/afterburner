@@ -19,3 +19,5 @@ First version.
 - Text files are read as UTF-8 whatever the locale, so afterburner works when started without `LANG`.
 - Fixed: a library edited while no script was running stayed stale until afterburner restarted.
 - Fixed: `class Float … end` in a script made a new class instead of reopening Ruby's.
+- `ns` and `logger` work anywhere in a running script's code, including libraries and methods added to Ruby's
+  classes, not only at the script's top level; likewise in the console.

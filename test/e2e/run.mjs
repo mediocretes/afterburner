@@ -208,6 +208,11 @@ async function main() {
     if (logged(/greeting\.js/)) throw new Error("lib/greeting.rb got a stub");
   });
 
+  await check("ns works inside a library's methods, e.g. a Numeric patch", async () => {
+    const match = await expectOutput(page, "run pct.js", /half is ([^;]+); two is (\S+)/);
+    return `${match[1]}, ${match[2]}`;
+  });
+
   await check("killing the stub stops the Ruby script", async () => {
     await expectOutput(page, "run forever.js", /forever\.js/);
     await waitUntil(() => logged(/\[forever\.rb pid \d+\] started/), 5000, "forever.rb to start");
@@ -280,7 +285,8 @@ async function main() {
     await waitUntil(() => console_.output.join("").includes("run afterburner/console.js"), 10000, "the console to be ready");
     await expectOutput(page, "run afterburner/console.js", /afterburner\/console\.js/);
     await waitUntil(() => console_.output.join("").includes("Attached to pid"), 10000, "the console to attach");
-    console_.child.stdin.end("puts \"level=#{ns.hacking_level}\"\nexit\n");
+    // ns works at the prompt, and inside a class defined there.
+    console_.child.stdin.end("class Probe\n  def self.level = ns.hacking_level\nend\nputs \"level=#{Probe.level}\"\nexit\n");
     const { code, output } = await console_.done;
     if (code !== 0 || !/level=\d+/.test(output)) throw new Error(`exit ${code}:\n${output}`);
     return output.match(/level=\d+/)[0];

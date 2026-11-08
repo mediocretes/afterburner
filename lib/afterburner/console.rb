@@ -4,6 +4,7 @@ require "async"
 require "async/http/endpoint"
 require "async/websocket/client"
 require "json"
+require "logger"
 require "protocol/websocket/message"
 
 module Afterburner
@@ -58,6 +59,10 @@ module Afterburner
     end
 
     def at_exit(&) = raise(ArgumentError, "at_exit is for scripts, not the console")
+
+    attr_reader :ns
+
+    def logger = @logger ||= Logger.new(@out, formatter: ->(_severity, _time, _program, message) { "#{message}\n" })
 
     private
 
@@ -126,8 +131,11 @@ module Afterburner
 
     def start_irb(ns)
       require "irb"
+      @ns = ns
+      # As in a script: `ns` and `logger` also work inside methods and classes
+      # you define here.
+      Fiber[:afterburner_session] = self
       context = Object.new
-      context.define_singleton_method(:ns) { ns }
       context.define_singleton_method(:inspect) { "afterburner" }
       context.instance_eval { binding }.irb(show_code: false)
     end

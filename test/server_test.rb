@@ -317,6 +317,22 @@ class ServerTest < Minitest::Test
     assert_equal %w[v1 v2], printed
   end
 
+  def test_ns_and_logger_work_anywhere_in_a_scripts_code
+    library = "class Numeric\n  def af_plus_level = self + ns.hacking_level\nend\n" \
+              "class AfTalker\n  def self.go = logger.info('from a class')\nend\n"
+    played = play("require_relative 'lib/helpers'\nputs 0.5.af_plus_level\nputs 3.af_plus_level\nAfTalker.go",
+                  files: { "lib/helpers.rb" => library }, answers: { "getHackingLevel" => 5 })
+    assert_equal [["getHackingLevel", []], ["tprint", ["5.5"]], ["getHackingLevel", []], ["tprint", ["8"]],
+                  ["print", ["from a class"]]], played.calls
+  ensure
+    Numeric.send(:remove_method, :af_plus_level) if Numeric.method_defined?(:af_plus_level)
+  end
+
+  def test_ns_outside_a_running_script_says_why
+    error = assert_raises(NameError) { Object.new.send(:ns) }
+    assert_match(/only available while a Ruby script is running/, error.message)
+  end
+
   def test_refuses_names_outside_the_scripts_or_in_lib
     ["../outside.rb", "/etc/passwd", "lib/helper.rb", "missing.rb"].each do |name|
       played = play("puts 1", files: { "lib/helper.rb" => "" }, start: { op: "start", script: name, args: [], pid: 1 })

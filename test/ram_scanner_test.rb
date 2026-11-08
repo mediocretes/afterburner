@@ -69,6 +69,11 @@ class RamScannerTest < Minitest::Test
     assert_equal ["ns.hakc"], scan("ns.hakc('x')").unknown
   end
 
+  def test_a_bare_ns_inside_a_library_method_is_charged
+    result = scan("require_relative 'lib/ext'\nputs 1.level", "lib/ext.rb" => "class Numeric\n  def level = ns.hacking_level\nend\n")
+    assert_equal ["getHackingLevel"], result.charges.map(&:name)
+  end
+
   def test_follows_require_relative
     result = scan("require_relative 'lib/helper'\nHelper.go(ns)", "lib/helper.rb" => "module Helper\n  def self.go(ns) = ns.hack('x')\nend\n")
     assert_equal ["hack"], result.charges.map(&:name)
