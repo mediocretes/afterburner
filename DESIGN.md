@@ -103,8 +103,8 @@ the RAM scanner both use it, so anything a script can call is something it's cha
 - Keyword arguments become the trailing options object, keys camelCased.
 - `NS` is a `BasicObject`, so names like `print`, `format`, and `sleep` reach the game rather than `Kernel`.
   Besides the game's names it answers only Ruby's reflection protocol (`inspect`, `respond_to?`, and `methods`,
-  which lists the Ruby names so IRB can tab-complete them). IRB only completes after a variable or a constant;
-  `ns` is one at the console prompt because the prompt's binding is made inside `Console#start_irb(ns)`.
+  which lists the Ruby names so IRB can tab-complete them). IRB only completes after a variable or a constant,
+  so the console prompt also has `ns` as a local.
 - `AB` holds afterburner's own tools (`AB.functions`, `AB.doc`), so they never collide with a game function. It
   finds the API through the same fiber-local session as `ns`. Docs come from the definitions file: the parser
   keeps each member's JSDoc and signature, and `AB::Docs` renders them with Ruby names. An options object as the
@@ -121,6 +121,11 @@ the RAM scanner both use it, so anything a script can call is something it's cha
   also holds every top-level class and module (Ruby's, and libraries'): a class definition looks only in the
   module it's in, so without them `class Float` in a script would make a new `Float` in the script's module
   and a monkeypatch would silently do nothing. A class a script defines itself stays in its module.
+- The console's prompt is a script's top level. `Console#prompt_binding` loads `console_prompt.rb` wrapped in a
+  fresh `ScriptContext` module, as a script is loaded, and IRB runs on the binding that file leaves behind. So
+  what works at the prompt works in a script: the same constants (afterburner's own `Server` and `Record` are
+  out of sight), `ARGV`, top-level methods kept in the module, and `class Float` reopening the real one. Only
+  `ns` differs, as a local rather than a method, for tab completion; it's the same object.
 - `$stdout`/`$stderr` are replaced (in `watch`) by an object that routes writes by fiber-local storage: inside a
   script they go to its terminal (`ns.tprint`), elsewhere to the real stream. So `puts` works from classes and
   gems too. `logger` writes to `ns.print`.
@@ -220,6 +225,7 @@ It is not a sandbox for the Ruby you write.
 | `lib/afterburner/session.rb` | one running script, its protocol, hot reload |
 | `lib/afterburner/script_context.rb` | what a script sees at top level; routing `puts` to the game |
 | `lib/afterburner/console.rb` | the IRB side of `afterburner console` |
+| `lib/afterburner/console_prompt.rb` | loaded like a script to make the console prompt's binding |
 | `lib/afterburner/api.rb` | definitions parser, name resolution, documented costs |
 | `lib/afterburner/ns.rb` | the `ns` proxy, `NetscriptError` |
 | `lib/afterburner/ab.rb` | `AB`: `AB.functions`, `AB.doc`, and rendering the docs |

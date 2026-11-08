@@ -24,3 +24,5 @@ First version.
 - `AB`, for afterburner's own tools: `AB.functions(pattern)` lists functions with their RAM costs, and
   `AB.doc(name)` shows a function's Ruby call, keyword options, signature, and the game's docs.
 - `ns.methods` lists the Ruby names `ns` answers to, and `ns.<Tab>` completes them in the console.
+- The console's prompt is a script's top level, so code behaves there as it would in a script. afterburner's
+  own classes no longer show through: `Server` at the prompt was afterburner's Remote API server.
