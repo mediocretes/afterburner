@@ -116,6 +116,7 @@ class ServerTest < Minitest::Test
       when "pushFile" then @pushed[params["filename"]] = params["content"] and "OK"
       when "deleteFile" then @deleted << params["filename"] and "OK"
       when "getAllFiles" then @files
+      when "getAllFileMetadata" then @files.map { { "filename" => _1["filename"], "mtime" => _1["mtime"] } }
       when "calculateRam" then 1.7
       when "getSaveFile" then { "identifier" => "x", "binary" => true, "save" => "\x1F\x8B\x00\xFF".b.unpack("C*").pack("U*") }
       end
@@ -460,6 +461,30 @@ class ServerTest < Minitest::Test
       assert_equal "\x1F\x8B\x00\xFF".b, save.body.b
       assert_match(/\AbitburnerSave_\d+\.json\.gz\z/, save["x-afterburner-filename"])
       assert_equal "1.7", get("/ram?file=hello.js").body
+    ensure
+      task&.stop
+    end
+  end
+
+  def test_scripts_are_copied_into_the_save_and_served_back_for_restore
+    saved_elsewhere = { "filename" => "afterburner/src/other.rb.txt", "content" => "puts 'from the other machine'", "mtime" => 1 }
+    serve(files: { "src/hello.rb" => "puts 'hi'", "src/lib/util.rb" => "X = 1" }) do |dir, log|
+      game = FakeGame.new(self, files: [saved_elsewhere])
+      task = Async { game.run }
+      eventually { game.pushed.key?("afterburner/src/hello.rb.txt") }
+      assert_equal "puts 'hi'", game.pushed["afterburner/src/hello.rb.txt"]
+      assert_equal "X = 1", game.pushed["afterburner/src/lib/util.rb.txt"]
+      eventually { log.string.include?("the save holds 1 Ruby file that src/ doesn't (other.rb)") }
+
+      sources = JSON.parse(get("/sources").body)
+      assert_equal [{ "name" => "other.rb", "content" => "puts 'from the other machine'", "mtime" => 1 }], sources
+
+      write(dir, "src/hello.rb", "puts 'hello again'")
+      File.utime(Time.now + 5, Time.now + 5, File.join(dir, "src/hello.rb"))
+      eventually { game.pushed["afterburner/src/hello.rb.txt"] == "puts 'hello again'" }
+      File.delete(File.join(dir, "src/lib/util.rb"))
+      eventually { game.deleted.include?("afterburner/src/lib/util.rb.txt") }
+      refute_includes game.deleted, "afterburner/src/other.rb.txt", "copies from elsewhere stay"
     ensure
       task&.stop
     end

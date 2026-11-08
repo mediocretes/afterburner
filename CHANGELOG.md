@@ -18,3 +18,4 @@ First version.
   scripts folder set at the top; `AFTERBURNER_SRC` sets it for afterburner too.
 - Fixed: a library edited while no script was running stayed stale until afterburner restarted.
 - Fixed: `class Float … end` in a script made a new class instead of reopening Ruby's.
+- Copies of the Ruby sources are kept in the save, and `afterburner restore` writes them back into `src/`.
