@@ -69,7 +69,7 @@ module Afterburner
 
     private
 
-    def push(link, name) = link.push_file(name, File.read(File.join(@root, name)))
+    def push(link, name) = link.push_file(name, Afterburner.read_text(File.join(@root, name)).scrub)
 
     def excluded?(name)
       parts = name.split("/")

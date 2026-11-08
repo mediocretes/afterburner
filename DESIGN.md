@@ -189,6 +189,7 @@ It is not a sandbox for the Ruby you write.
 | `lib/afterburner/ram_costs.rb` | the measured-cost cache |
 | `lib/afterburner/scripts.rb` | which files are scripts; safe name resolution |
 | `lib/afterburner/config.rb` | settings from `filesync.json` and flags |
+| `lib/afterburner/autostart.rb` | `afterburner autostart`: a launchd agent (macOS) or Startup-folder script (Windows) |
 | `lib/afterburner/proxy.js` | the in-game half |
 | `test/*_test.rb` | unit tests (`rake test`); server tests play the game over real sockets |
 | `test/e2e/run.mjs` | the live-game test (`rake e2e`) |
@@ -229,6 +230,12 @@ What's most likely to break, and what watches for it:
 - **The game's origin.** The web build's is fixed; Steam's is `file://` (seen on macOS). If either
   changes, `--origin` accepts the new one without a code change, and `--verbose` logs every connection's
   origin.
+
+- **The login environment.** Started at login (`afterburner autostart`), there's no `LANG`, so Ruby takes
+  files to be US-ASCII, and the game's definitions file isn't ASCII. afterburner reads every text file as
+  UTF-8 (`Afterburner.read_text`), and the CLI sets `Encoding.default_external` to UTF-8 so scripts behave as
+  they do in a terminal. The launchd agent also sets `LANG`, and a `PATH` that starts with the Ruby it was
+  installed from, since login items get neither your shell's PATH nor a version manager's shims.
 
 `--verbose` logs every message between afterburner and running scripts.
 

@@ -13,3 +13,6 @@ First version.
 - `afterburner console`, `save`, `ram`, and `stub`.
 - `--verbose`, `--origin`, and `--no-reload`.
 - Scripts restarted by a loading save wait for afterburner rather than failing.
+- `afterburner autostart on|off`: start `afterburner watch` at login (launchd on macOS, the Startup folder on
+  Windows).
+- Text files are read as UTF-8 whatever the locale, so afterburner works when started without `LANG`.

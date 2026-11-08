@@ -115,11 +115,27 @@ any `ns` call in progress (a `hack`, say) to finish. `--no-reload` turns it off.
 | `afterburner save [FILE]` | Download the game's live save, as the in-game export would. |
 | `afterburner ram FILE...` | RAM a script needs: `.rb` files are scanned locally, with a breakdown; anything else is the game's own figure. |
 | `afterburner stub FILE.rb` | Print the JavaScript stub the game runs for a script. |
+| `afterburner autostart on` | Start `afterburner watch` for this project whenever you log in (`off` undoes it; on its own, it tells you whether it's set up and running). |
 
 Options: `--port`, `--src` (Ruby scripts; default `src`), `--dist` (other files to sync; default from
 `filesync.json`, or none), `--definitions`, `--costs`, `--no-reload`, `--origin URL` (accept the game from
 another address), and `--verbose` (log every message to and from scripts, for bug reports). Run
 `afterburner --help` for details.
+
+## Starting it with your computer
+
+Your Ruby scripts only run while afterburner does. To have it start whenever you log in, run this once in
+your project, the folder with your Gemfile:
+
+```sh
+bundle exec afterburner autostart on
+```
+
+On macOS that installs a background launchd agent, logging to `.afterburner/afterburner.log`. On Windows it
+puts a script in your Startup folder that opens afterburner in a minimized window; close the window to stop
+it. Neither needs admin rights. `afterburner autostart off` undoes it, and `afterburner autostart` tells you
+whether it's set up and running. If the game restarts your Ruby scripts before afterburner is up, they wait
+up to a minute for it. Add `.afterburner/` to your `.gitignore`: it holds the log and a cache.
 
 ## RAM
 

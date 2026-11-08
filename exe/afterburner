@@ -8,6 +8,7 @@
 #   afterburner save [FILE]      download the game's live save
 #   afterburner ram FILE...      RAM a script needs: .rb scanned here, others asked of the game
 #   afterburner stub FILE.rb     print the stub the game runs for a Ruby script
+#   afterburner autostart on     start `afterburner watch` here whenever you log in (off, or no word for status)
 
 require "logger"
 require "net/http"
@@ -17,6 +18,10 @@ require_relative "../lib/afterburner"
 
 # async uses IO::Buffer, which warns on every start.
 Warning[:experimental] = false
+
+# Started at login, there's no LANG, and Ruby would take files to be ASCII.
+# Scripts should read and write text the same however afterburner started.
+Encoding.default_external = Encoding::UTF_8
 
 flags = {}
 console_ram = 4.0
@@ -30,6 +35,9 @@ parser = OptionParser.new do |opts|
       save [FILE]      download the game's live save
       ram FILE...      RAM a script needs: .rb scanned here, others asked of the game
       stub FILE.rb     print the stub the game runs for a Ruby script
+      autostart on     start `afterburner watch` for this folder whenever you log in
+      autostart off    stop doing that
+      autostart        say whether it's set up, and whether it's running
 
     Options:
   TEXT
@@ -108,6 +116,14 @@ when "stub"
     name = File.expand_path(file).delete_prefix("#{Afterburner::Scripts.new(config.src).root}/").sub(/\.rb\z/, ".js")
     stub = stubs[name] or abort "No stub for #{file}: is it a script under #{config.src}, and has the game connected once?"
     out.puts stub.content
+  end
+when "autostart"
+  action = arguments.first || "status"
+  abort "Usage: afterburner autostart [on|off]" unless %w[on off status].include?(action)
+  begin
+    Afterburner::Autostart.for_this_computer(project: Dir.pwd, port: config.port, out:).public_send(action)
+  rescue Afterburner::Autostart::Error => e
+    abort "afterburner: #{e.message}"
   end
 when "version"
   out.puts Afterburner::VERSION
