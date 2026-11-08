@@ -149,9 +149,11 @@ Ruby you write: that's your code, on your machine.
 ## Platforms
 
 - **Web build, in Chrome**: tested. Needs the local network permission.
-- **Steam build**: tested on macOS. No permission needed. If afterburner ever logs
+- **Steam build**: tested on macOS and Windows. No permission needed. If afterburner ever logs
   `refused a connection from …`, please open an issue with that origin.
-- **Windows**: the unit tests pass there in CI; not yet tried against the game.
+- **Windows**: tested with the Steam build, using Ruby from [RubyInstaller](https://rubyinstaller.org)
+  with its DevKit (`winget install RubyInstallerTeam.RubyWithDevKit.4.0`, then `ridk.cmd install 1 3`).
+  The unit tests also run there in CI.
 
 ## Limits
 
