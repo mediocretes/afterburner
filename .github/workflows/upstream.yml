@@ -1,0 +1,27 @@
+name: Upstream definitions
+
+# afterburner reads the game's NetscriptDefinitions.d.ts line by line. This
+# checks that it still can, against the game's current source, so a format
+# change upstream shows up here before it shows up for players.
+on:
+  schedule:
+    - cron: "0 12 * * 1"
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  definitions:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        branch: [stable, dev]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "4.0"
+          bundler-cache: true
+      - run: curl -fsSL -o NetscriptDefinitions.d.ts "https://raw.githubusercontent.com/bitburner-official/bitburner-src/${{ matrix.branch }}/src/ScriptEditor/NetscriptDefinitions.d.ts"
+      - run: bundle exec ruby -Ilib -Itest test/api_test.rb --verbose
