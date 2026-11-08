@@ -58,7 +58,7 @@ afterburner syncs `dist/` and runs `src/*.rb`.
 ### Starting it with a double-click
 
 [`launchers/`](launchers) has two files to copy into your project, next to your Gemfile:
-`Start afterburner.command` for macOS and `Start afterburner.cmd` for Windows. Double-click one and it opens
+`start_afterburner` for macOS and `start_afterburner.cmd` for Windows. Double-click one and it opens
 a window running everything the project needs:
 - it installs anything missing (`bundle install`, and `npm install` for the TypeScript template);
 - then it runs `npm run watch` if your `package.json` has a watch script, or `afterburner watch` if not.
