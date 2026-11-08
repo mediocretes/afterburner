@@ -30,3 +30,5 @@ First version.
   `--ram` takes a percentage or GB, and the console says how much it got.
 - Records have `keys`, the snake_case field names, and their `methods` include the field readers, so
   `server.<Tab>` completes fields in the console.
+- Fixed: Ruby's "already initialized constant" warnings reached a script's terminal when a library was loaded
+  again, as after a reload that failed.
