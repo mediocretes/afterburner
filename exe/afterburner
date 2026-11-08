@@ -8,6 +8,7 @@
 #   afterburner save [FILE]      download the game's live save
 #   afterburner ram FILE...      RAM a script needs: .rb scanned here, others asked of the game
 #   afterburner stub FILE.rb     print the stub the game runs for a Ruby script
+#   afterburner restore          copy the Ruby scripts kept in the game's save into src/
 
 require "logger"
 require "net/http"
@@ -18,8 +19,14 @@ require_relative "../lib/afterburner"
 # async uses IO::Buffer, which warns on every start.
 Warning[:experimental] = false
 
+# Started without LANG, Ruby would take files to be ASCII. Scripts should read
+# and write text the same however afterburner was started.
+Encoding.default_external = Encoding::UTF_8
+
 flags = {}
 console_ram = 4.0
+dry_run = false
+force = false
 parser = OptionParser.new do |opts|
   opts.banner = <<~TEXT
     Usage: afterburner COMMAND [options]
@@ -30,6 +37,7 @@ parser = OptionParser.new do |opts|
       save [FILE]      download the game's live save
       ram FILE...      RAM a script needs: .rb scanned here, others asked of the game
       stub FILE.rb     print the stub the game runs for a Ruby script
+      restore          copy the Ruby scripts kept in the game's save into src/
 
     Options:
   TEXT
@@ -41,6 +49,8 @@ parser = OptionParser.new do |opts|
   opts.on("--[no-]reload", "watch: restart running scripts when their code changes (default: on)") { flags[:reload] = _1 }
   opts.on("--origin URL", "watch: also accept the game from this origin (repeatable)") { (flags[:origins] ||= []) << _1 }
   opts.on("--ram GB", Float, "console: RAM to claim (default: 4)") { console_ram = _1 }
+  opts.on("--dry-run", "restore: say what would change, change nothing") { dry_run = true }
+  opts.on("--force", "restore: take the save's copy even where yours is newer (yours is backed up)") { force = true }
   opts.on("--verbose", "watch: log every message to and from running scripts") { flags[:verbose] = true }
   opts.on("-v", "--version", "Print the version") do
     puts Afterburner::VERSION
@@ -108,6 +118,24 @@ when "stub"
     name = File.expand_path(file).delete_prefix("#{Afterburner::Scripts.new(config.src).root}/").sub(/\.rb\z/, ".js")
     stub = stubs[name] or abort "No stub for #{file}: is it a script under #{config.src}, and has the game connected once?"
     out.puts stub.content
+  end
+when "restore"
+  response = ask.call("/sources")
+  abort response.body unless response.is_a?(Net::HTTPSuccess)
+  saved = JSON.parse(response.body).map { Afterburner::SourceBackup::Saved.new(**_1.transform_keys(&:to_sym)) }
+  abort "The save doesn't hold any Ruby scripts yet." if saved.empty?
+
+  restore = Afterburner::SourceRestore.new(root: config.src, saved:, force:)
+  steps = dry_run ? restore.plan : restore.run
+  verbs = { write: dry_run ? "would write" : "wrote", replace: dry_run ? "would replace" : "replaced",
+            skip: "unchanged", keep: "kept yours", refuse: "refused" }
+  steps.each { out.puts format("  %-13s src/%s (%s)", verbs.fetch(_1.action), _1.name, _1.reason) }
+  if steps.any? { _1.action == :replace } && !dry_run
+    out.puts "Your replaced files are in #{restore.backup_dir}"
+  end
+  if steps.any? { %i[write replace].include?(_1.action) }
+    out.puts "These came from the game's save, which any script in the game can write to: " \
+             "look over code you didn't write before you run it."
   end
 when "version"
   out.puts Afterburner::VERSION

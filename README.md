@@ -23,6 +23,8 @@ afterburner is one local process that:
 From the game's side, `scout.rb` is just `scout.js`: `run`, `kill`, `ps`, threads, and RAM all work as
 usual, and the game charges a Ruby script for the functions it calls, exactly as it would JavaScript.
 
+![A Ruby script's output in the game's terminal, in the Steam build](docs/steam.png)
+
 ## Quick start
 
 You need Ruby 3.4 or newer and Bitburner v3.
@@ -52,6 +54,18 @@ If you use the official [typescript-template](https://github.com/bitburner-offic
 afterburner reads its `filesync.json` and takes over from bitburner-filesync. In `package.json`, swap
 `bitburner-filesync` for `bundle exec afterburner watch`. `tsc` keeps compiling `src/*.ts` into `dist/`;
 afterburner syncs `dist/` and runs `src/*.rb`.
+
+### Starting it with a double-click
+
+[`launchers/`](launchers) has two files to copy into your project, next to your Gemfile:
+`Start afterburner.command` for macOS and `Start afterburner.cmd` for Windows. Double-click one and it opens
+a window running everything the project needs:
+- it installs anything missing (`bundle install`, and `npm install` for the TypeScript template);
+- then it runs `npm run watch` if your `package.json` has a watch script, or `afterburner watch` if not.
+
+Close the window, or press Ctrl-C, to stop. afterburner runs only while that window is open, and nothing is
+installed to start it for you. The folder whose files become the game's home folder is set at the top of each
+launcher (`SCRIPTS=src`). From a terminal, it's `--src DIR` or the `AFTERBURNER_SRC` environment variable.
 
 ## Writing Ruby scripts
 
@@ -118,11 +132,31 @@ any `ns` call in progress (a `hack`, say) to finish. `--no-reload` turns it off.
 | `afterburner save [FILE]` | Download the game's live save, as the in-game export would. |
 | `afterburner ram FILE...` | RAM a script needs: `.rb` files are scanned locally, with a breakdown; anything else is the game's own figure. |
 | `afterburner stub FILE.rb` | Print the JavaScript stub the game runs for a script. |
+| `afterburner restore [--dry-run] [--force]` | Copy the Ruby scripts kept in the game's save into `src/` (see below). |
 
-Options: `--port`, `--src` (Ruby scripts; default `src`), `--dist` (other files to sync; default from
+Options: `--port`, `--src` (Ruby scripts; default `src`, or `AFTERBURNER_SRC`), `--dist` (other files to sync; default from
 `filesync.json`, or none), `--definitions`, `--costs`, `--no-reload`, `--origin URL` (accept the game from
 another address), and `--verbose` (log every message to and from scripts, for bug reports). Run
 `afterburner --help` for details.
+
+## Your Ruby code travels with the save
+
+The game keeps JavaScript in your save, but Ruby lives on your disk. So afterburner also keeps a copy of every
+`.rb` under `src/` in the save, as `afterburner/src/hello.rb.txt`, updated as you edit. Move the save to
+another machine (Steam Cloud, an export) and the code goes with it; there, run:
+
+```sh
+bundle exec afterburner restore --dry-run   # what would change
+bundle exec afterburner restore
+```
+
+It writes what `src/` is missing and what the save has newer, and keeps your file where it's newer (`--force`
+takes the save's, after backing yours up in `.afterburner/replaced/`). Going the other way, afterburner never
+overwrites a newer copy in the save with an older local file; it says so instead.
+
+Getting code *out* of the save is never automatic, because any script in the game can write files there: a
+script you pasted in could plant Ruby that afterburner would then run on your computer. `restore` lists
+everything it writes; look over code you didn't write.
 
 ## RAM
 
@@ -150,9 +184,11 @@ Ruby you write: that's your code, on your machine.
 ## Platforms
 
 - **Web build, in Chrome**: tested. Needs the local network permission.
-- **Steam build**: tested on macOS. No permission needed. If afterburner ever logs
+- **Steam build**: tested on macOS and Windows. No permission needed. If afterburner ever logs
   `refused a connection from …`, please open an issue with that origin.
-- **Windows**: the unit tests pass there in CI; not yet tried against the game.
+- **Windows**: tested with the Steam build, using Ruby from [RubyInstaller](https://rubyinstaller.org)
+  with its DevKit (`winget install RubyInstallerTeam.RubyWithDevKit.4.0`, then `ridk.cmd install 1 3`).
+  The unit tests also run there in CI.
 
 ## Limits
 

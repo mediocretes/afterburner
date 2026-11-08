@@ -96,6 +96,18 @@ class ApiTest < Minitest::Test
     assert_equal ["inherited"], Afterburner::Api.new(definitions).resolve([], "inherited").path
   end
 
+  def test_loads_non_ascii_definitions_under_an_ascii_locale
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "NetscriptDefinitions.d.ts")
+      File.write(path, FIXTURE_DEFINITIONS.sub("Steal money.", "Steal money \u2014 quietly."))
+      previous = Encoding.default_external
+      Encoding.default_external = Encoding::US_ASCII # as when started without LANG
+      assert_equal ["hack"], Afterburner::Api.load(path).resolve([], "hack").path
+    ensure
+      Encoding.default_external = previous
+    end
+  end
+
   def test_name_conversions
     assert_equal "get_server_max_money", Afterburner::Api.underscore("getServerMaxMoney")
     assert_equal "additionalMsec", Afterburner::Api.camelize(:additional_msec)

@@ -7,7 +7,9 @@ module Afterburner
 
   # Settings. afterburner reads filesync.json if there is one, so it can stand
   # in for bitburner-filesync (as in the official TypeScript template) without
-  # new configuration; flags override it.
+  # new configuration; flags override it. AFTERBURNER_SRC sets the scripts
+  # folder too, for when afterburner is started through something else (the
+  # launchers set it on their way through `npm run watch`).
   Config = Data.define(:port, :src, :dist, :extensions, :exclude, :allow_deleting, :definitions, :costs, :reload, :origins) do
     DEFAULT_PORT = 12_525
     # Never synced, whatever filesync.json says: syncing them would be slow or wrong.
@@ -18,7 +20,7 @@ module Afterburner
       json_dist = json && (json["scriptsFolder"] || ".")
       new(
         port: flags[:port] || json&.dig("port") || DEFAULT_PORT,
-        src: File.expand_path(flags[:src] || "src", dir),
+        src: File.expand_path(flags[:src] || ENV.fetch("AFTERBURNER_SRC", "").then { _1.empty? ? nil : _1 } || "src", dir),
         dist: (flags[:dist] || json_dist)&.then { File.expand_path(_1, dir) },
         extensions: json&.dig("allowedFiletypes") || %w[.js .script .txt],
         exclude: (json&.dig("exclude") || %w[.vscode .idea .github]) | ALWAYS_EXCLUDE,
@@ -34,7 +36,7 @@ module Afterburner
       file = File.join(dir, "filesync.json")
       return nil unless File.exist?(file)
 
-      json = JSON.parse(File.read(file))
+      json = JSON.parse(Afterburner.read_text(file))
       raise ConfigError, "#{file} should hold a JSON object" unless json.is_a?(Hash)
 
       json

@@ -3,8 +3,8 @@
 This is the design document: enough to pick the project up cold. The README covers using it.
 
 Status: 0.1.0, a working prototype. Verified end to end against the live web game (v3.0.1) in a headless
-browser (`rake e2e`, 15 checks), and by hand in the Steam build on macOS. Unit tests pass on Linux, macOS,
-and Windows; not yet tried against the game on Windows.
+browser (`rake e2e`, 15 checks), and by hand in the Steam build on macOS and Windows. Unit tests pass on
+Linux, macOS, and Windows.
 
 ## The shape of it
 
@@ -23,7 +23,7 @@ process on your machine, and borrows the game's `ns` over a WebSocket:
      │                  runs scout.rb; each ns call   │      serve(ns, "scout.rb")   │
      │                  goes back to the stub ───────▶│      makes the call          │
      │  ws /console ◀── afterburner console (IRB)     └──────────────────────────────┘
-     │  GET /save, /ram ◀── afterburner save / ram
+     │  GET /save, /ram, /sources ◀── afterburner save / ram / restore
 ```
 
 - **The stub** (pushed as `scout.js`) is a few lines: `ns.ramOverride(<cost>)` as the first statement of
@@ -86,7 +86,7 @@ message and backtrace.
 back. Leaving the console sends the stub `exit`; the stub stopping sends the console `ended`. On the console
 side, IRB runs on the main thread and the WebSocket in a background thread's reactor, talking through queues.
 
-**`/save` and `/ram?file=`**: plain HTTP for the CLI. `/save` returns the bytes `getSaveFile` describes (a
+**`/save`, `/ram?file=`, and `/sources`**: plain HTTP for the CLI. `/sources` lists the save's copies of the Ruby scripts, with contents and `mtime`, for `afterburner restore`. `/save` returns the bytes `getSaveFile` describes (a
 binary save arrives as one character per byte) with a suggested file name; `/ram` returns `calculateRam`.
 
 ## The Ruby side
@@ -114,6 +114,21 @@ the RAM scanner both use it, so anything a script can call is something it's cha
   gems too. `logger` writes to `ns.print`.
 - `at_exit` blocks run before the game hears a script is done, so they can still use `ns`. After a kill they
   run too, but `ns` calls in them raise rather than wait for an answer that won't come.
+
+## Ruby sources in the save
+
+`SourceBackup` keeps a copy of every `src/**/*.rb` in the save as `afterburner/src/<name>.txt` (the game stores
+only script and `.txt`/`.json`/`.css` files), so the code travels with it. On connect it pushes each script
+unless the save's copy is identical, or newer by the game's `mtime` (from `getAllFileMetadata`, allowing 2 s of
+clock difference); a newer copy is left in place with a warning. Copies with no local file are reported, not
+deleted: they may be another machine's. While connected, edits are pushed and deletions remove the copies
+this session put there.
+
+`afterburner restore` (`SourceRestore`, via the server's `/sources`) is the only way code comes back out, on
+purpose: any in-game script can write files to the save, so automatic restoring would let one plant Ruby that
+afterburner runs on the host. It writes missing files and newer copies, keeps newer local files unless
+`--force` (backing them up to `.afterburner/replaced/<time>/`), and refuses names that would land outside
+`src/`.
 
 ## Hot reload
 
@@ -183,6 +198,7 @@ It is not a sandbox for the Ruby you write.
 | `lib/afterburner/game_link.rb` | the game's Remote API connection |
 | `lib/afterburner/file_sync.rb` | syncing other files |
 | `lib/afterburner/stubs.rb` | building and pushing stubs |
+| `lib/afterburner/source_backup.rb` | copies of the Ruby sources in the save; `afterburner restore` |
 | `lib/afterburner/session.rb` | one running script, its protocol, hot reload |
 | `lib/afterburner/script_context.rb` | what a script sees at top level; routing `puts` to the game |
 | `lib/afterburner/console.rb` | the IRB side of `afterburner console` |
@@ -194,6 +210,7 @@ It is not a sandbox for the Ruby you write.
 | `lib/afterburner/scripts.rb` | which files are scripts; safe name resolution |
 | `lib/afterburner/config.rb` | settings from `filesync.json` and flags |
 | `lib/afterburner/proxy.js` | the in-game half |
+| `launchers/` | double-clickable starters to copy into a project: install what's missing, then run the watch |
 | `test/*_test.rb` | unit tests (`rake test`); server tests play the game over real sockets |
 | `test/e2e/run.mjs` | the live-game test (`rake e2e`) |
 
@@ -204,8 +221,10 @@ It is not a sandbox for the Ruby you write.
 - **Steam build**: loads the game with `window.loadFile("index.html")`, and its WebSockets carry
   `Origin: file://` (seen on macOS). It sets no permission handler, so Electron grants local network access
   without asking. It also disables background throttling: scripts keep full speed when the window isn't
-  focused, unlike a background Chrome tab. Tested by hand on macOS.
-- **Windows**: nothing intentionally Unix-only; `async`/`io-event` support Windows. Untested.
+  focused, unlike a background Chrome tab. Tested by hand on macOS and Windows.
+- **Windows**: tested by hand with the Steam build (Ruby 4.0.7 from RubyInstaller with DevKit), and the
+  unit tests run there in CI. `io-event` uses its pure-Ruby `select` backend there. In PowerShell, run
+  `ridk.cmd` rather than `ridk`: the default execution policy blocks `ridk.ps1`.
 
 ## Known limits
 
@@ -233,6 +252,11 @@ What's most likely to break, and what watches for it:
 - **The game's origin.** The web build's is fixed; Steam's is `file://` (seen on macOS). If either
   changes, `--origin` accepts the new one without a code change, and `--verbose` logs every connection's
   origin.
+
+- **The locale.** Started without `LANG` (from a launcher, a scheduler, an editor), Ruby takes files to be
+  US-ASCII, and the game's definitions file isn't ASCII. afterburner reads every text file as UTF-8
+  (`Afterburner.read_text`), and the CLI sets `Encoding.default_external` to UTF-8 so scripts behave as they do
+  in a terminal.
 
 `--verbose` logs every message between afterburner and running scripts.
 

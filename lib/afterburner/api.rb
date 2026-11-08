@@ -26,7 +26,7 @@ module Afterburner
 
     # measured: RAM costs the game reported (qualified name → GB), which win
     # over the documented ones. See RamCosts.
-    def self.load(path, measured: {}) = new(File.read(path), measured:)
+    def self.load(path, measured: {}) = new(Afterburner.read_text(path), measured:)
 
     def initialize(definitions, measured: {})
       @measured = measured
