@@ -13,3 +13,5 @@ First version.
 - `afterburner console`, `save`, `ram`, and `stub`.
 - `--verbose`, `--origin`, and `--no-reload`.
 - Scripts restarted by a loading save wait for afterburner rather than failing.
+- Fixed: a library edited while no script was running stayed stale until afterburner restarted.
+- Fixed: `class Float … end` in a script made a new class instead of reopening Ruby's.
