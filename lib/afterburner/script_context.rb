@@ -9,7 +9,9 @@ module Afterburner
     def self.build(session)
       ns = session.ns
       logger = session.logger
+      shared = top_level_modules
       Module.new do
+        shared.each { |name, value| const_set(name, value) }
         const_set(:ARGV, session.args.dup.freeze)
         const_set(:NetscriptError, Afterburner::NetscriptError)
         define_method(:ns) { ns }
@@ -18,6 +20,26 @@ module Afterburner
         define_method(:abort) { |message = "aborted"| raise ScriptAbort, message }
         define_method(:exit!) { |*| raise SystemExit }
       end
+    end
+
+    # Ruby's classes and modules, and any a library has defined. Inside a
+    # script's module, `class Float` would otherwise make a new Float in that
+    # module instead of reopening Ruby's (class definitions only look in the
+    # module they're in), so a monkeypatch would silently do nothing. Classes
+    # a script defines itself still stay its own.
+    def self.top_level_modules
+      verbose = $VERBOSE
+      $VERBOSE = nil # some constants warn when looked up
+      Object.constants.filter_map do |name|
+        next if Object.autoload?(name)
+
+        value = Object.const_get(name)
+        [name, value] if value.is_a?(Module)
+      rescue NameError, LoadError
+        nil
+      end
+    ensure
+      $VERBOSE = verbose
     end
   end
 

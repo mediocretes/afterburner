@@ -115,7 +115,7 @@ module Afterburner
 
     def local_files = local_stamps.to_h { |name, mtime| [name, [read(name), mtime]] }
 
-    def read(name) = File.read(File.join(@scripts.root, name), encoding: Encoding::UTF_8).scrub
+    def read(name) = Afterburner.read_text(File.join(@scripts.root, name)).scrub
   end
 
   # `afterburner restore`: writes the save's copies of Ruby scripts into
@@ -139,7 +139,7 @@ module Afterburner
         path = File.join(@root, copy.name)
         if !File.exist?(path)
           Step.new(copy.name, :write, "new")
-        elsif File.read(path, encoding: Encoding::UTF_8) == copy.content
+        elsif Afterburner.read_text(path) == copy.content
           Step.new(copy.name, :skip, "already the same")
         elsif copy.mtime && copy.mtime / 1000.0 > File.mtime(path).to_f + SourceBackup::SLACK
           Step.new(copy.name, :write, "the save's copy is newer")

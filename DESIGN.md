@@ -105,7 +105,10 @@ the RAM scanner both use it, so anything a script can call is something it's cha
 - `Record` wraps game objects: snake_case readers, `?` predicates (dropping `has`/`is`), `[]`, `to_h`, pattern
   matching. Sent back to the game as the original object.
 - Each run is `load(path, fresh_module)`, so scripts' constants and methods don't leak into each other. The
-  module provides `ns`, `ARGV`, `logger`, `NetscriptError`, and per-script `at_exit`, `abort`, `exit`.
+  module provides `ns`, `ARGV`, `logger`, `NetscriptError`, and per-script `at_exit`, `abort`, `exit`. It
+  also holds every top-level class and module (Ruby's, and libraries'): a class definition looks only in the
+  module it's in, so without them `class Float` in a script would make a new `Float` in the script's module
+  and a monkeypatch would silently do nothing. A class a script defines itself stays in its module.
 - `$stdout`/`$stderr` are replaced (in `watch`) by an object that routes writes by fiber-local storage: inside a
   script they go to its terminal (`ns.tprint`), elsewhere to the real stream. So `puts` works from classes and
   gems too. `logger` writes to `ns.print`.
@@ -132,7 +135,8 @@ afterburner runs on the host. It writes missing files and newer copies, keeps ne
 The server's tick compares the mtimes of every `.rb` under `src/`. When a file changes, each running Session
 whose files (its script plus whatever it `require_relative`s, from the RAM scan) include it is asked to reload:
 
-1. Changed libraries that are loaded are required again first (deleted from `$LOADED_FEATURES`, then
+1. Changed libraries that are loaded are required again first, whether or not anything is running, so the
+   next run gets the new code (restarting running scripts is what `--no-reload` turns off) (deleted from `$LOADED_FEATURES`, then
    `require`d). Not `load`: a plain `load` evaluates under the thread's current top-level wrapper, and that
    state is per thread, not per fiber, so while any script sits paused inside its own wrapped `load`, a
    library re-`load`ed from the server lands inside that script's anonymous module. `require` always
