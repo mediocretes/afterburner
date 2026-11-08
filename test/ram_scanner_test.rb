@@ -54,6 +54,12 @@ class RamScannerTest < Minitest::Test
 
   def test_send_with_a_literal_name
     assert_equal ["hack"], charged("ns.public_send(:hack, 'x')")
+    assert_equal ["nuke"], charged("ns.send(:nuke, 'x')")
+    assert_equal ["hasRootAccess"], charged("ns.__send__(:root_access?, 'x')")
+  end
+
+  def test_send_with_a_name_in_a_variable_isnt_charged
+    assert_empty scan("m = :hack\nns.public_send(m, 'x')").charges
   end
 
   def test_methods_on_results_arent_charged

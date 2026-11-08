@@ -24,6 +24,9 @@ module Afterburner
   # Objects come back as Records (server.money_max). It's a BasicObject so
   # that names like print, format, and sleep reach the game, not Kernel.
   class NS < BasicObject
+    # What NS answers itself, rather than passing to the game.
+    OWN = %i[inspect to_s respond_to? methods public_send send].freeze
+
     def initialize(session, api, path = [])
       @session = session
       @api = api
@@ -43,8 +46,18 @@ module Afterburner
     end
 
     def respond_to?(name, _include_all = false)
-      %i[inspect to_s respond_to? methods].include?(name.to_sym) || !@api.resolve(@path, name).nil?
+      OWN.include?(name.to_sym) || !@api.resolve(@path, name).nil?
     end
+
+    # ns.public_send(:hack, target), for a function chosen by name. The RAM scan
+    # charges it when the name is a literal symbol, as in that example; a name
+    # in a variable isn't charged, and the game stops the script when it makes
+    # the call. BasicObject has only __send__, which works too. send is the same
+    # as public_send here: it doesn't reach NS's private methods.
+    def public_send(name, ...)
+      OWN.include?(name.to_sym) ? __send__(name, ...) : method_missing(name.to_sym, ...)
+    end
+    alias send public_send
 
     # The Ruby names this answers to: functions, namespaces, and properties,
     # with the short aliases but not the JavaScript names. IRB's tab completion
