@@ -67,12 +67,16 @@ module Afterburner
       raise Error, "#{method}: the game didn't answer within #{TIMEOUT} seconds"
     end
 
-    def push_file(name, content) = request("pushFile", { filename: name, content:, server: "home" })
+    def push_file(name, content, server: "home") = request("pushFile", { filename: name, content:, server: })
     def delete_file(name) = request("deleteFile", { filename: name, server: "home" })
     def definitions = request("getDefinitionFile")
     def all_files = request("getAllFiles", { server: "home" })
     def all_file_metadata = request("getAllFileMetadata", { server: "home" })
     def calculate_ram(name) = request("calculateRam", { filename: name, server: "home" })
+    def file(name, server:) = request("getFile", { filename: name, server: })
+    def file_names(server) = request("getFileNames", { server: })
+    # Every server: [{"hostname" => ..., "hasAdminRights" => ..., "purchasedByPlayer" => ...}, ...]
+    def all_servers = request("getAllServers")
 
     # The live save, as the bytes an in-game export would give you.
     def save

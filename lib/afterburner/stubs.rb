@@ -113,6 +113,37 @@ module Afterburner
       JS
     end
 
+    # Scripts copy the proxy to other servers (ns.scp) so stubs can run there,
+    # and those copies don't update themselves. On connect, bring every copy on
+    # a server you have root on up to date with this afterburner's, so stubs
+    # everywhere behave alike. Only servers that already have a copy are
+    # touched, and only copies that differ are written. A game too old for
+    # getAllServers, an answer in a shape we don't know, or one server that
+    # won't answer just means less to refresh; it never stops the sync.
+    def refresh_proxy_copies(link)
+      source = Stubs.proxy_source
+      servers = link.all_servers
+      return unless servers.is_a?(Array)
+
+      hosts = servers.filter_map { _1["hostname"] if _1.is_a?(Hash) && _1["hasAdminRights"] && _1["hostname"] != "home" }
+      updated = hosts.select { |host| refresh_proxy_copy(link, host, source) }
+      @log.info("updated #{PROXY} on #{updated.size} other #{updated.size == 1 ? 'server' : 'servers'}") if updated.any?
+    rescue StandardError => e # GameLink::Error, or an answer in a shape we did not expect
+      @log.warn("couldn't update #{PROXY} on other servers: #{e.message}")
+    end
+
+    # True if host had an out-of-date copy, now replaced.
+    def refresh_proxy_copy(link, host, source)
+      return false unless Array(link.file_names(host)).include?(PROXY)
+      return false if link.file(PROXY, server: host) == source
+
+      link.push_file(PROXY, source, server: host)
+      true
+    rescue GameLink::Error => e
+      @log.debug("couldn't check #{PROXY} on #{host}: #{e.message}")
+      false
+    end
+
     # On connect: push the proxy and every stub, and delete stubs left in the
     # game from scripts that are gone.
     def push_all(link)

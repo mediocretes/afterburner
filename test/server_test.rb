@@ -92,10 +92,16 @@ class ServerTest < Minitest::Test
   class FakeGame
     attr_reader :pushed, :deleted, :methods
 
-    def initialize(test, files: [])
+    # remote: files on other servers, { "n00dles" => { "name" => "content" } };
+    # pushes to them land there, and pushed_to records them.
+    attr_reader :remote, :pushed_to
+
+    def initialize(test, files: [], remote: {})
       @test = test
       @files = files
+      @remote = remote
       @pushed = {}
+      @pushed_to = Hash.new { |h, k| h[k] = {} }
       @deleted = []
       @methods = []
     end
@@ -113,13 +119,26 @@ class ServerTest < Minitest::Test
       params = request["params"] || {}
       case request["method"]
       when "getDefinitionFile" then FIXTURE_DEFINITIONS
-      when "pushFile" then @pushed[params["filename"]] = params["content"] and "OK"
+      when "pushFile" then push(params) and "OK"
+      when "getAllServers"
+        [{ "hostname" => "home", "hasAdminRights" => true, "purchasedByPlayer" => true },
+         *@remote.keys.map { { "hostname" => _1, "hasAdminRights" => _1 != "unrooted", "purchasedByPlayer" => false } }]
+      when "getFileNames" then (@remote[params["server"]] || {}).keys
+      when "getFile" then @remote.dig(params["server"], params["filename"])
       when "deleteFile" then @deleted << params["filename"] and "OK"
       when "getAllFiles" then @files
       when "getAllFileMetadata" then @files.map { { "filename" => _1["filename"], "mtime" => _1["mtime"] } }
       when "calculateRam" then 1.7
       when "getSaveFile" then { "identifier" => "x", "binary" => true, "save" => "\x1F\x8B\x00\xFF".b.unpack("C*").pack("U*") }
       end
+    end
+
+    def push(params)
+      server = params["server"] || "home"
+      return @pushed[params["filename"]] = params["content"] if server == "home"
+
+      @remote[server][params["filename"]] = params["content"]
+      @pushed_to[server][params["filename"]] = params["content"]
     end
   end
 
@@ -476,6 +495,75 @@ class ServerTest < Minitest::Test
       eventually { game.deleted.include?("gone.js") }
     ensure
       task&.stop
+    end
+  end
+
+  def test_connecting_updates_proxy_copies_on_other_servers
+    serve(files: { "src/hello.rb" => "ns.hack('x')" }) do |_dir, log|
+      current = Afterburner::Stubs.proxy_source
+      game = FakeGame.new(self, remote: {
+                            "n00dles" => { "afterburner/proxy.js" => "// an old proxy", "hgw1.js" => "x" },
+                            "foodnstuff" => { "afterburner/proxy.js" => current },
+                            "joesguns" => { "notes.txt" => "no proxy here" },
+                            "unrooted" => { "afterburner/proxy.js" => "// old, but not on a server you have root on" },
+                          })
+      task = Async { game.run }
+      eventually { log.string.include?("updated afterburner/proxy.js on 1 other server") }
+      assert_equal({ "n00dles" => { "afterburner/proxy.js" => current } }, game.pushed_to.to_h)
+    ensure
+      task&.stop
+    end
+  end
+
+  def test_a_game_without_get_all_servers_still_syncs
+    serve(files: { "src/hello.rb" => "ns.hack('x')" }) do |_dir, log|
+      game = FakeGame.new(self)
+      game.define_singleton_method(:answer) { |request| request["method"] == "getAllServers" ? nil : super(request) }
+      task = Async { game.run }
+      eventually { game.pushed.key?("hello.js") }
+      sleep 0.2
+      refute_match(/couldn't update|failed/, log.string)
+    ensure
+      task&.stop
+    end
+  end
+
+  # Plays a stub's side of one run: start, answer calls, return the last message.
+  def run_stub(start)
+    connect("/script") do |connection|
+      transmit(connection, start)
+      while (message = receive(connection))
+        next transmit(connection, op: "costs", costs: {}) if message["op"] == "costs"
+        return message unless message["op"] == "call"
+
+        transmit(connection, op: "result", id: message["id"], value: nil)
+      end
+    end
+  end
+
+  def test_scripts_resumed_after_a_restart_run_again_and_are_summed_up_in_one_line
+    serve(files: { "src/farm.rb" => "ns.hack(ARGV.first)" }) do |_dir, log|
+      finals = [7, 8].map { |pid| run_stub(op: "start", script: "farm.rb", args: ["n00dles"], pid:, ram: 1.7, resumed: true) }
+      assert_equal %w[exit exit], finals.map { _1["op"] }
+      eventually(timeout: 6) { log.string.include?("2 Ruby scripts reconnected and started again from the top") }
+      refute_includes log.string, "started with", "a resume isn't logged as a fresh start"
+    end
+  end
+
+  def test_a_resumed_script_that_now_needs_more_ram_ends_quietly
+    serve(files: { "src/farm.rb" => "ns.hack(ARGV.first)\nns.get_server(ARGV.first)" }) do |_dir, log|
+      final = run_stub(op: "start", script: "farm.rb", args: ["n00dles"], pid: 7, ram: 1.7, resumed: true)
+      assert_equal "exit", final["op"], "ends without an error dialog: #{final["message"]}"
+      assert_match(/now needs [\d.]+ GB, more than this process claimed \(1\.7 GB\)\. Run it again/, final["message"])
+      eventually { log.string.include?("[farm.rb pid 7] not resumed") }
+    end
+  end
+
+  def test_a_fresh_start_that_needs_more_than_its_claim_is_not_refused
+    serve(files: { "src/farm.rb" => "ns.hack(ARGV.first)\nns.get_server(ARGV.first)" }) do |_dir, _log|
+      final = run_stub(op: "start", script: "farm.rb", args: ["n00dles"], pid: 7, ram: 1.7)
+      assert_equal "exit", final["op"]
+      assert_nil final["message"]
     end
   end
 

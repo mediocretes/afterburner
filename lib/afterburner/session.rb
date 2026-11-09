@@ -67,8 +67,11 @@ module Afterburner
       @pid = start["pid"]
       @args = Codec.decode(start["args"] || []).freeze
       @claim = start["ram"]
+      @resumed = start["resumed"] == true
       @path = @scripts.resolve(@script)
-      @files = RamScanner.new(@ram_api).scan(@path).files
+      scan = RamScanner.new(@ram_api).scan(@path)
+      @files = scan.files
+      return outgrown(scan.ram) if @resumed && @claim && scan.ram > @claim + 1e-9
       measure_costs if @costs&.due?
       @ns = NS.new(self, @api)
       @logger = script_logger
@@ -169,7 +172,10 @@ module Afterburner
     # works again.
     def execute
       Fiber[:afterburner_session] = self
-      if @runs.zero?
+      if @runs.zero? && @resumed
+        # The server sums these up in one line; one per script would flood the log.
+        @log.debug("[#{label}] resumed")
+      elsif @runs.zero?
         @log.info("[#{label}] started#{" with #{@args.inspect}" unless @args.empty?}")
       else
         run_exit_hooks
@@ -207,6 +213,15 @@ module Afterburner
       e.message
     rescue Exception => e # rubocop:disable Lint/RescueException -- report SyntaxError and friends too
       describe(e)
+    end
+
+    # A script resumed after afterburner came back whose code now needs more RAM
+    # than its process claimed. The game would stop it at the first call over;
+    # end it here instead, quietly, saying how to pick up the new code.
+    def outgrown(needed)
+      @log.warn("[#{label}] not resumed: it now needs #{needed} GB and its stub claimed #{@claim} GB; run it again")
+      deliver(op: "exit", message: "afterburner: #{@script} now needs #{needed} GB, more than this process " \
+                                   "claimed (#{@claim} GB). Run it again to use the new code.")
     end
 
     def refuse(message)
