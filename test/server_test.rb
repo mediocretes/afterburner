@@ -292,6 +292,20 @@ class ServerTest < Minitest::Test
     Float.send(:remove_method, :af_test_pct) if Float.method_defined?(:af_test_pct)
   end
 
+  # The first time a library loads in afterburner's process, its classes didn't
+  # exist when the script's module was built. Reopening one must still reach it.
+  def test_a_script_reopens_a_class_from_a_library_it_just_loaded
+    library = "class FirstLoadWidget\n  def initialize(size) = @size = size\nend\n"
+    script = "require_relative 'lib/widget'\nclass FirstLoadWidget\n  def doubled = @size * 2\nend\n" \
+             "puts FirstLoadWidget.new(21).doubled"
+    refute Object.const_defined?(:FirstLoadWidget), "the test needs a library loading for the first time"
+    played = play(script, files: { "lib/widget.rb" => library })
+    assert_equal [["tprint", ["42"]]], played.calls, played.final["message"]
+    assert Object.const_get(:FirstLoadWidget).method_defined?(:doubled), "reopened the library's class, not a new one"
+  ensure
+    Object.send(:remove_const, :FirstLoadWidget) if Object.const_defined?(:FirstLoadWidget)
+  end
+
   def test_a_library_edited_while_nothing_runs_is_fresh_for_the_next_run
     library = "module IdleReloadHelper\n  def self.tag = 'v1'\nend\n"
     printed = []
