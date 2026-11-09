@@ -20,10 +20,13 @@ module Afterburner
     # Loaded to make the prompt's binding; see prompt_binding.
     PROMPT = File.expand_path("console_prompt.rb", __dir__)
 
-    def initialize(port:, ram:, definitions:, out: $stdout, input: $stdin)
+    # src: the scripts folder, which require_relative at the prompt resolves
+    # against.
+    def initialize(port:, ram:, definitions:, src: nil, out: $stdout, input: $stdin)
       @port = port
       @ram = ram
       @definitions = definitions
+      @src = src
       @out = out
       @input = input
       @next_id = 0
@@ -76,8 +79,17 @@ module Afterburner
     # prompt works in a script, and afterburner's own classes stay out of the
     # way. Plus `ns` as a local, because IRB only tab-completes after a
     # variable or a constant; in a script it's a method, and the same object.
+    #
+    # require_relative resolves against the scripts folder, as for a script at
+    # its top, so `require_relative 'lib/server'` works here as it does in
+    # src/foo.rb. Ruby's own would look beside console_prompt.rb, which is in
+    # afterburner.
     def prompt_binding(ns)
-      load(PROMPT, ScriptContext.build(self))
+      context = ScriptContext.build(self)
+      if (root = @src&.then { File.expand_path(_1) })
+        context.define_method(:require_relative) { |path| require(File.expand_path(path, root)) }
+      end
+      load(PROMPT, context)
       top = Fiber[:afterburner_prompt]
       top.local_variable_set(:ns, ns)
       top

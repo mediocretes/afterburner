@@ -135,6 +135,8 @@ the RAM scanner both use it, so anything a script can call is something it's cha
   what works at the prompt works in a script: the same constants (afterburner's own `Server` and `Record` are
   out of sight), `ARGV`, top-level methods kept in the module, and `class Float` reopening the real one. Only
   `ns` differs, as a local rather than a method, for tab completion; it's the same object.
+  `require_relative` resolves against the scripts folder, as for a script at its top (Ruby's own would look
+  beside `console_prompt.rb`, in afterburner).
 - `$stdout`/`$stderr` are replaced (in `watch`) by an object that routes writes by fiber-local storage: inside a
   script they go to its terminal (`ns.tprint`), elsewhere to the real stream. So `puts` works from classes and
   gems too. `logger` writes to `ns.print`.
