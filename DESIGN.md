@@ -141,7 +141,15 @@ the RAM scanner both use it, so anything a script can call is something it's cha
   classes defined at its prompt. The RAM scan already charges a bare `ns` in any file it reaches. It
   also holds every top-level class and module (Ruby's, and libraries'): a class definition looks only in the
   module it's in, so without them `class Float` in a script would make a new `Float` in the script's module
-  and a monkeypatch would silently do nothing. A class a script defines itself stays in its module.
+  and a monkeypatch would silently do nothing. A class a script defines itself stays in its module. The module
+  is built before the script runs, so a library the script loads can define classes it doesn't have yet; the
+  module's own `require`, `require_relative` (resolved against the caller's file, as Ruby's is), and `load`
+  share any new top-level classes into it afterwards, never replacing a name the script defined itself.
+  Otherwise `class Server` after `require_relative 'lib/server'` made an empty `Server` the first time the
+  library loaded in afterburner's process, and reopened the real one after that. The console prompt is built
+  the same way, so the same holds there. That `load` sends a `.rb` file through `require` (forgotten first, so
+  it runs again), for the reason library reloads do: a plain `load` evaluates under the thread's top-level
+  wrapper, which is another script's module while that script is paused inside its own wrapped load.
 - The console's prompt is a script's top level. `Console#prompt_binding` loads `console_prompt.rb` wrapped in a
   fresh `ScriptContext` module, as a script is loaded, and IRB runs on the binding that file leaves behind. So
   what works at the prompt works in a script: the same constants (afterburner's own `Server` and `Record` are

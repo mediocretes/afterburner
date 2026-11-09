@@ -33,6 +33,9 @@ First version.
 - Fixed: `ns.public_send(:name, ...)` and `ns.send` raised `NoMethodError`, though the RAM scan charged them.
 - Fixed: Ruby's "already initialized constant" warnings reached a script's terminal when a library was loaded
   again, as after a reload that failed.
+- Fixed: reopening a class from a library you had just loaded (`require_relative 'lib/server'`, then
+  `class Server … end`) made a new, empty class instead, in a script the first time that library loaded and at
+  the console prompt.
 - Restarting afterburner no longer stops Ruby scripts. Each waits for it, then starts again from the top in the
   same process; one log line counts them. When the game connects, copies of the proxy on other servers are
   brought up to date, so scripts there resume too. Scripts restarted by a loading save now wait for afterburner

@@ -35,6 +35,57 @@ class ConsoleTest < Minitest::Test
     Integer.remove_method(:afterburner_prompt_test) if Integer.method_defined?(:afterburner_prompt_test)
   end
 
+  # A class required at the prompt didn't exist when the prompt was built;
+  # `class Name` afterwards must reopen it, not hide it behind an empty one.
+  def test_a_class_required_at_the_prompt_can_be_reopened_there
+    Dir.mktmpdir do |src|
+      FileUtils.mkdir_p(File.join(src, "lib"))
+      File.write(File.join(src, "lib", "probe.rb"), "class PromptReopenProbe\n  def initialize(host) = @host = host\nend\n")
+      prompt = Afterburner::Console.new(port: 0, ram: 4, definitions: "unused", src:).prompt_binding(@ns)
+      prompt.eval("require_relative 'lib/probe'")
+      prompt.eval("class PromptReopenProbe\n  def host = @host\nend")
+      assert_same Object.const_get(:PromptReopenProbe), prompt.eval("PromptReopenProbe")
+      assert_equal "iron-gym", prompt.eval("PromptReopenProbe.new('iron-gym').host")
+    end
+  ensure
+    Object.send(:remove_const, :PromptReopenProbe) if Object.const_defined?(:PromptReopenProbe)
+  end
+
+  def test_load_at_the_prompt_shares_classes_too
+    Dir.mktmpdir do |dir|
+      file = File.join(dir, "loaded.rb")
+      File.write(file, "class PromptLoadProbe; end\n")
+      at_prompt("load #{file.inspect}")
+      assert_same Object.const_get(:PromptLoadProbe), at_prompt("class PromptLoadProbe; self; end")
+    end
+  ensure
+    Object.send(:remove_const, :PromptLoadProbe) if Object.const_defined?(:PromptLoadProbe)
+  end
+
+  # A script paused inside its own wrapped load (waiting on an ns call) leaves
+  # the thread's top-level wrapper pointing at its module; a plain Kernel#load
+  # then would put the file's classes there instead of at the top level.
+  def test_load_reaches_the_top_level_while_a_script_is_paused_mid_load
+    Dir.mktmpdir do |dir|
+      paused = File.join(dir, "paused.rb")
+      File.write(paused, "Fiber.yield\n")
+      script = Fiber.new { load(paused, Module.new) }
+      script.resume # now paused inside its wrapped load
+      file = File.join(dir, "probe.rb")
+      File.write(file, "class PausedLoadProbe; end\n")
+      at_prompt("load #{file.inspect}")
+      assert Object.const_defined?(:PausedLoadProbe, false), "the class landed in the paused script's module"
+      script.resume
+    end
+  ensure
+    Object.send(:remove_const, :PausedLoadProbe) if Object.const_defined?(:PausedLoadProbe, false)
+  end
+
+  def test_a_class_the_prompt_defines_first_stays_its_own
+    at_prompt("class PromptOwnProbe; end")
+    refute Object.const_defined?(:PromptOwnProbe)
+  end
+
   def test_methods_defined_at_the_prompt_dont_leak
     at_prompt("def helper = 42")
     assert_equal 42, at_prompt("helper")
