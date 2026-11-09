@@ -146,6 +146,18 @@ process has called, old code included. So if the new code would need more than t
 leaves the old code running and says so; run the script again to pick up the change. A reload also waits for
 any `ns` call in progress (a `hack`, say) to finish. `--no-reload` turns it off.
 
+## When afterburner restarts
+
+Restarting afterburner, or stopping it for a while, doesn't stop your Ruby scripts. Each one waits, however long
+that takes, and starts again from the top when afterburner is back: same pid, threads, arguments, and RAM. Its log
+says so, and afterburner's log counts how many came back in one line. As with a reload, Ruby state from before is
+gone; unlike a reload, the old run's `at_exit` blocks don't run, because the process they lived in has stopped.
+If the code now needs more RAM than the process claimed, the script ends quietly and its log says to run it again.
+
+Scripts on other servers resume too. When the game connects, afterburner brings every copy of
+`afterburner/proxy.js` your scripts have put on other servers (with `ns.scp`) up to date with its own. The console
+ends when afterburner stops; start it again.
+
 ## Commands
 
 | | |
@@ -226,7 +238,7 @@ runs, but if a script touches your machine beyond `ns` (writing files, the netwo
 - A game object's field whose name is also a Ruby method (`hash`, `class`, `display`) has to be read as
   `record[:hash]`.
 - Reloading the game stops all running Ruby scripts. When a save loads, the game restarts them, and each one
-  waits up to a minute for afterburner to be running.
+  waits for afterburner to be running.
 - Functions that take callbacks or return objects with methods (`ns.get_port_handle`, React-node printers) don't
   cross over, except `ns.at_exit { }`, which runs in Ruby.
 - Each running Ruby script holds one WebSocket. That's fine for scripts that make decisions; workers you run at

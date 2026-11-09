@@ -38,6 +38,8 @@ module Afterburner
     # probably fallen behind a change in the file's format.
     EXPECTED_FUNCTIONS = 300
     DEFINITIONS_PATIENCE = 30
+    # Seconds without another script reconnecting before the resumes are reported.
+    RESUME_QUIET = 3
 
     def initialize(config, log:)
       @config = config
@@ -55,6 +57,7 @@ module Afterburner
       @console = nil
       @sessions = Set.new
       @stamps = nil
+      @resumes = 0
     end
 
     # Serves until the task running it is stopped: Sync { server.run }.
@@ -97,6 +100,17 @@ module Afterburner
       @stubs.tick(link)
       @backup.tick(link)
       notice_changed_scripts
+      report_resumes
+    end
+
+    # Ruby scripts reconnect on their own when afterburner comes back after a
+    # restart, a few seconds apart. Once they've stopped arriving, say how many
+    # in one line rather than one per script.
+    def report_resumes
+      return if @resumes.zero? || Time.now - @last_resume < RESUME_QUIET
+
+      @log.info("#{@resumes} Ruby #{@resumes == 1 ? 'script' : 'scripts'} reconnected and started again from the top")
+      @resumes = 0
     end
 
     # Hot reload. Libraries a running script has loaded are loaded again
@@ -190,6 +204,7 @@ module Afterburner
       @files&.push_all(link)
       @stubs.push_all(link)
       @backup.push_all(link)
+      @stubs.refresh_proxy_copies(link)
     rescue GameLink::Error => e
       @log.warn("syncing with the game failed: #{e.message}")
     end
@@ -209,6 +224,10 @@ module Afterburner
                                                     "Reconnect under Options → Remote API, then run this again.")
       end
 
+      if start["resumed"]
+        @resumes += 1
+        @last_resume = Time.now
+      end
       session = Session.new(connection, api:, scripts: @scripts, costs: @costs, ram_api:, log: @log)
       @sessions << session
       session.run(start)
