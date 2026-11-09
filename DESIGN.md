@@ -54,31 +54,43 @@ process on your machine, and borrows the game's `ns` over a WebSocket:
 1. `getDefinitionFile` → saved as `NetscriptDefinitions.d.ts` (the RAM scan and the `ns` names come from it).
 2. Every synced file is pushed.
 3. The proxy and every stub are pushed; `getAllFiles` finds stale stubs to delete.
+4. Copies of the proxy that scripts put on other servers are brought up to date: `getAllServers` for the
+   servers you have root on, `getFileNames` for which have `afterburner/proxy.js`, `getFile` to skip ones
+   already current. A failure here (an older game without `getAllServers`, say) is logged and nothing else.
 
 ## Protocols
 
 **Remote API** (the game's; afterburner is the server, the game the client): JSON-RPC 2.0. afterburner uses
-`pushFile`, `deleteFile`, `getAllFiles`, `getDefinitionFile`, `getSaveFile`, `calculateRam`. The game also
-offers `getFile`, `getFileNames`, `getFileMetadata`, `getAllFileMetadata`, and `getAllServers` (which lists every
-server, found or not). There is no way to run a script; that's what stubs are for. Handlers:
+`pushFile` (to home, and to other servers for proxy copies), `deleteFile`, `getAllFiles`, `getDefinitionFile`,
+`getSaveFile`, `calculateRam`, `getAllServers` (which lists every server, found or not), `getFileNames`, and
+`getFile`. The game also offers `getFileMetadata` and `getAllFileMetadata`. There is no way to run a script; that's what stubs are for. Handlers:
 bitburner-src `src/RemoteFileAPI/MessageHandlers.ts`.
 
 **Scripts** (afterburner's own, on `/script`), JSON text frames, one socket per running script:
 
 ```
-stub → afterburner  {op: "start", script: "scout.rb", args: [...], pid: 3, ram: 2.25}
+stub → afterburner  {op: "start", script: "scout.rb", args: [...], pid: 3, ram: 2.25, resumed: false}
 afterburner → stub  {op: "costs", names: [...]}         (at most once a minute; see RAM)
 stub → afterburner  {op: "costs", costs: {"hack": 0.1, ...}}
 afterburner → stub  {op: "call", id: 1, path: ["hacknet", "numNodes"], args: [...]}
 stub → afterburner  {op: "result", id: 1, value: ...} | {op: "error", id: 1, message: "..."}
-afterburner → stub  {op: "exit"} | {op: "fail", message: "..."}
+afterburner → stub  {op: "exit", message?: "..."} | {op: "fail", message: "..."}
 ```
 
 `ram` is what the stub claimed, for hot reload. A script makes one call at a time, so the game never sees
 concurrent `ns` calls from it. A `path` naming a
 non-function (`["enums"]`) reads the property. JSON can't carry `Infinity` or `NaN`, so both sides tag them as
 `{"$num": "Infinity"}`. `fail` makes the stub throw, so the game shows its usual error dialog, with the Ruby
-message and backtrace.
+message and backtrace. An `exit` message goes to the script's log, with no dialog.
+
+When afterburner goes away mid-run (restarted, or stopped), a stub doesn't end: it logs that to its own log and
+reconnects, every 2 s for a minute and then every 10 s, with no deadline. When it's back, the stub sends `start`
+again with `resumed: true`, and afterburner runs the script from the top in the same process. A kill in the game
+still ends it (the stub's `atExit` sets a flag first), and so does the console stub, whose IRB went with
+afterburner. On a resume afterburner checks the code against the claim, since the code may have grown while it
+was away: if it no longer fits, it sends `exit` with a message saying to run it again, rather than letting the
+game kill it at the first call over. Resumes are logged at debug; the server sums them up in one line once
+they've stopped arriving for 3 s.
 
 **Console** (`/console`): `afterburner console` connects with `?ram=`, GB or a percentage (default `80%`).
 afterburner pushes `afterburner/console.js`, a stub with that claim whose script is the special name `@console`,

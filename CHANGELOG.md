@@ -36,5 +36,9 @@ First version.
 - Fixed: reopening a class from a library you had just loaded (`require_relative 'lib/server'`, then
   `class Server … end`) made a new, empty class instead, in a script the first time that library loaded and at
   the console prompt.
+- Restarting afterburner no longer stops Ruby scripts. Each waits for it, then starts again from the top in the
+  same process; one log line counts them. When the game connects, copies of the proxy on other servers are
+  brought up to date, so scripts there resume too. Scripts restarted by a loading save now wait for afterburner
+  however long it takes, not just a minute.
 - Fixed: `require_relative` at the console prompt looked in afterburner's own folder. It now resolves against
   the scripts folder, so `require_relative 'lib/server'` works there as it does in a script.
