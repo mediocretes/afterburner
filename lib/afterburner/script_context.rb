@@ -21,7 +21,9 @@ module Afterburner
         # built: a library's Server, say. Share those too, so `class Server`
         # in the script reopens that one rather than making an empty one here.
         define_method(:require) { |name| super(name).tap { ScriptContext.share(context) } }
-        define_method(:load) { |file, wrap = false| super(file, wrap).tap { ScriptContext.share(context) } }
+        define_method(:load) do |file, wrap = false|
+          ScriptContext.load_at_top_level(file, wrap) { super(file, wrap) }.tap { ScriptContext.share(context) }
+        end
         # Kernel#require_relative would resolve against this file; resolve
         # against the caller's, as Ruby's does, and share through require.
         define_method(:require_relative) do |path|
@@ -29,6 +31,21 @@ module Afterburner
           require(File.expand_path(path, File.dirname(base)))
         end
       end
+    end
+
+    # Kernel#load evaluates under the thread's current top-level wrapper, and
+    # while another script sits paused inside its own wrapped load, that's the
+    # other script's module: the file's classes would land there. require
+    # always evaluates at the real top level, so a .rb file is loaded through
+    # it, forgotten first so it runs again, as load always does. Anything else
+    # (another extension, or wrap) goes to Kernel#load.
+    def self.load_at_top_level(file, wrap)
+      path = File.expand_path(file.to_s)
+      return yield if wrap || !path.end_with?(".rb") || !File.file?(path)
+
+      [path, File.realpath(path)].each { $LOADED_FEATURES.delete(_1) }
+      require(path)
+      true
     end
 
     # Adds the top-level classes and modules defined since context was built,

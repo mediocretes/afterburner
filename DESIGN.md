@@ -135,7 +135,9 @@ the RAM scanner both use it, so anything a script can call is something it's cha
   share any new top-level classes into it afterwards, never replacing a name the script defined itself.
   Otherwise `class Server` after `require_relative 'lib/server'` made an empty `Server` the first time the
   library loaded in afterburner's process, and reopened the real one after that. The console prompt is built
-  the same way, so the same holds there.
+  the same way, so the same holds there. That `load` sends a `.rb` file through `require` (forgotten first, so
+  it runs again), for the reason library reloads do: a plain `load` evaluates under the thread's top-level
+  wrapper, which is another script's module while that script is paused inside its own wrapped load.
 - The console's prompt is a script's top level. `Console#prompt_binding` loads `console_prompt.rb` wrapped in a
   fresh `ScriptContext` module, as a script is loaded, and IRB runs on the binding that file leaves behind. So
   what works at the prompt works in a script: the same constants (afterburner's own `Server` and `Record` are

@@ -62,6 +62,25 @@ class ConsoleTest < Minitest::Test
     Object.send(:remove_const, :PromptLoadProbe) if Object.const_defined?(:PromptLoadProbe)
   end
 
+  # A script paused inside its own wrapped load (waiting on an ns call) leaves
+  # the thread's top-level wrapper pointing at its module; a plain Kernel#load
+  # then would put the file's classes there instead of at the top level.
+  def test_load_reaches_the_top_level_while_a_script_is_paused_mid_load
+    Dir.mktmpdir do |dir|
+      paused = File.join(dir, "paused.rb")
+      File.write(paused, "Fiber.yield\n")
+      script = Fiber.new { load(paused, Module.new) }
+      script.resume # now paused inside its wrapped load
+      file = File.join(dir, "probe.rb")
+      File.write(file, "class PausedLoadProbe; end\n")
+      at_prompt("load #{file.inspect}")
+      assert Object.const_defined?(:PausedLoadProbe, false), "the class landed in the paused script's module"
+      script.resume
+    end
+  ensure
+    Object.send(:remove_const, :PausedLoadProbe) if Object.const_defined?(:PausedLoadProbe, false)
+  end
+
   def test_a_class_the_prompt_defines_first_stays_its_own
     at_prompt("class PromptOwnProbe; end")
     refute Object.const_defined?(:PromptOwnProbe)
