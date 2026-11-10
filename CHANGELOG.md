@@ -33,6 +33,11 @@ First version.
 - Fixed: `ns.public_send(:name, ...)` and `ns.send` raised `NoMethodError`, though the RAM scan charged them.
 - Fixed: Ruby's "already initialized constant" warnings reached a script's terminal when a library was loaded
   again, as after a reload that failed.
+- The RAM scan charges only code a script can reach, so requiring a library of classes no longer charges a script
+  for methods it never calls. `afterburner ram` lists what it skipped, and falls back to charging everything when
+  the code dispatches in ways it can't follow.
+- Fixed: `ns.public_send("hack", ...)` with a string, and a literal `send` partway along a chain
+  (`ns.send(:hacknet).num_nodes`), weren't charged.
 - Fixed: reopening a class from a library you had just loaded (`require_relative 'lib/server'`, then
   `class Server … end`) made a new, empty class instead, in a script the first time that library loaded and at
   the console prompt.

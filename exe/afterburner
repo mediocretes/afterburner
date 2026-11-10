@@ -105,6 +105,10 @@ when "ram"
       costs = Afterburner::RamCosts.new(config.costs)
       scan = Afterburner::RamScanner.new(Afterburner::Api.load(config.definitions, measured: costs.load)).scan(file)
       out.puts "#{file}: #{scan.ram} GB = #{scan.breakdown}"
+      unless scan.skipped.empty?
+        out.puts "  not charged, in code it never reaches: #{scan.skipped.map { "#{_1.name} #{scan.format_gb(_1.ram)}" }.join(', ')}"
+      end
+      out.puts "  charged for every method it requires, because of #{scan.fallback}" if scan.fallback
       scan.unknown.each { out.puts "  #{_1} isn't a Netscript function" }
     else
       response = ask.call("/ram?#{URI.encode_www_form(file:)}")
