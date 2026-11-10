@@ -206,6 +206,7 @@ module Afterburner
 
       scan = scanner.scan(File.join(@scripts.root, script))
       scan.unknown.each { warn_once("#{script}: #{_1} isn't a Netscript function") }
+      warn_once("#{script}: charged for every method it requires, because of #{scan.fallback}") if scan.fallback
       Stub.new(script:, name:, content: stub_source(script, scan), scan:)
     end
 

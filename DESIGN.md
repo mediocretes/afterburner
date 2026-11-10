@@ -214,7 +214,37 @@ killed, too high wastes RAM.
 **Scan** (`ram_scanner.rb`, Prism): charges calls whose receiver chain starts at `ns`, `@ns`, a local or method
 named `ns`, or a variable assigned a namespace or `ns` itself; plus `ns.public_send(:name, ...)` (or `send`,
 `__send__`) with a literal. `NS` defines `public_send` and `send` itself, since `BasicObject` has only `__send__`.
-Follows `require_relative`. Calls on results (`ns.server(t).money_max`) aren't charged. Names that don't
+Follows `require_relative`.
+
+Only reachable code is charged. The scan splits the code into units: each file's load-time code (everything
+outside a `def`), each method by name (`def`, `def self.x`, `define_method(:x) { }`), and the lambdas a constant
+holds as plain data, by the constant's name. Plain data means the constant's value itself, or inside arrays and
+hashes of it, perhaps `.freeze`d: an `OPENERS` table of `->(host) { ns.brutessh(host) }` runs only when something
+uses `OPENERS`. A lambda that's called or passed somewhere while the value is built (`-> { }.call`,
+`Command.new(-> { })`) runs then, so it stays with the load-time code; `A = B = -> { }` reaches B's lambdas from A.
+Load-time code is reachable from the start. A reachable unit reaches every method whose name it calls, in any
+class (name-based, so it over-charges a little and never misses a method), and the lambdas of every constant it
+reads, including `const_get` with a literal (each part of `"A::B"`). Names count as called when called; when they
+are the reader and setter behind an attribute write (`obj.x += 1`, `obj.x ||= v`, `obj.x, y = ...`) or `[]`/`[]=`
+behind an index write; when passed as a literal symbol or string (`send(:x)`, `map(&:x)`, `inject(:+)`,
+`method(:x)`; not declarations like `attr_reader :x` or `define_method(:x)`); when aliased; as compound operators
+(`+=`); as backticks; and when Ruby, the standard library, or afterburner itself calls them (`RamScanner::IMPLICIT`:
+`initialize`, conversions, `each`, comparisons, `hash`, `coerce`, `call`, exception `message`, `Hash#default`,
+`write` for IO-like objects, `method_missing`, the hooks, and so on).
+
+If reachable code dispatches in a way the scan can't follow, it charges every unit and says why: `public_send`,
+`send`, `method`, `singleton_method`, `to_enum` with a name it can't read (on anything but `ns`), or with a name
+that dispatches again (`send(:public_send, ...)`, `method(:eval)`); `eval`/`class_eval` of a string; `const_get`
+or `alias_method` with a name it can't read; block-less `inject` with an operator it can't read; a block argument
+(`&x`) that isn't a literal symbol, a lambda or proc, `method(:x)`, a variable holding a lambda, or the method's
+own `&block`; and `to_proc` on something else. `afterburner ram` prints the reason and the watch logs it once.
+`afterburner ram` also lists the charges it skipped as unreachable. The rules came out of an adversarial review
+that ran every candidate miss for real; anything new of that kind should get a test in `ram_scanner_test.rb`.
+
+Known gaps, older than the reachability rules: `ns` reached in ways the alias tracking doesn't see (`GAME = ns`,
+`@x ||= ns.hacknet`, `self.ns`, `send(:ns)`, Forwardable delegation to `@ns`), and code loaded by anything but
+`require_relative` with a literal path (`require File.expand_path(...)`, `load`, `autoload`, globbed requires),
+which the scan never reads. Calls on results (`ns.server(t).money_max`) aren't charged. Names that don't
 resolve are logged ("ns.hakc isn't a Netscript function"). A call the scan can't see gets the script killed by
 the game, and the proxy appends a hint.
 

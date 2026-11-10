@@ -201,6 +201,16 @@ does for JavaScript, by reading the source (with [Prism](https://github.com/ruby
 through `ns`, `@ns`, or a variable holding a namespace (`hacknet = ns.hacknet`), and follows `require_relative`.
 `afterburner ram src/scout.rb` shows the breakdown.
 
+It charges only code the script can reach, so you can keep a rich library of classes and a small worker still pays
+for just what it uses. A worker that requires `lib/server.rb` and calls `server.security_ratio` pays for the two
+functions behind it, not for every method in the file. Code outside methods (a script's body, a class body) always
+counts; a method counts if anything reachable calls it by name, in any class; and lambdas kept in a constant count
+if reachable code uses the constant. Matching methods by name over-charges a little, never under-charges.
+`afterburner ram` lists what it didn't charge. If reachable code calls methods in a way it can't follow, such as
+`obj.public_send(name)` or `map(&name)` with the name in a variable, or `eval` of a string, it charges everything
+the script requires, as if all of it ran, and says why. Load other files with `require_relative` and a literal
+path: that's what the scan follows.
+
 To call a function chosen by name, use `ns.public_send(:brutessh, host)` (or `send`) with a literal symbol, which
 is charged. A call it can't see (a name in a variable or built at runtime, say) isn't charged, and the game stops
 the script when it makes that call, with a note explaining why.
