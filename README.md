@@ -164,8 +164,8 @@ Scripts on other servers resume too. When the game connects, afterburner brings 
 to it straight away. It holds its RAM while it waits: `AB.end_console` (or killing it in the game) frees it.
 
 The console stays open when afterburner restarts or the console script stops. It reattaches in the background,
-and an `ns` call you make meanwhile waits for it (Ctrl-C gives up). A game reload restarts the console script with
-everything else, and the console reattaches to it.
+and an `ns` call you make meanwhile waits for it (Ctrl-C gives up). If the console script was running when the game
+last saved, a game reload restarts it with everything else, and the console reattaches to it.
 
 Before each command, library files you've loaded from your scripts folder (`require_relative 'lib/server'`) are
 loaded again if they changed, so the command sees your edits. As with a reload in a running script, a method you

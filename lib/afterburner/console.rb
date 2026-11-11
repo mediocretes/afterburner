@@ -144,14 +144,21 @@ module Afterburner
     # code. Like a reload in a running script, it reopens classes: a method
     # deleted from the file stays defined until the console restarts.
     def reload_changed_files
-      return unless @root
-
-      prefixes = [@root, (File.realpath(@root) rescue @root)].uniq.map { "#{_1}/" }
-      $LOADED_FEATURES.select { |file| file.end_with?(".rb") && prefixes.any? { file.start_with?(_1) } }.each do |file|
+      loaded_library_files.each do |file|
         mtime = File.mtime(file)
         seen = @loaded[file]
         @loaded[file] = mtime
         reload(file) if seen && mtime != seen
+      rescue SystemCallError
+        nil
+      end
+    end
+
+    # After each command: notes when files it loaded were last changed, so an
+    # edit made before the next command counts as a change.
+    def note_loaded_files
+      loaded_library_files.each do |file|
+        @loaded[file] ||= File.mtime(file)
       rescue SystemCallError
         nil
       end
@@ -231,8 +238,14 @@ module Afterburner
       end
     end
 
-    # Another console is open, or --ram didn't parse: stop trying.
+    # Another console is open, or --ram didn't parse: stop trying. A console
+    # rejoining waits instead for the other one to leave.
     def refused(message)
+      if @ever_attached && message["message"].to_s.include?("Another console")
+        say("\nAnother console is attached; reattaching when it leaves...") unless @away_said
+        @away_said = true
+        return :lost
+      end
       @lock.synchronize do
         @fatal = message["message"]
         @changed.broadcast
@@ -298,6 +311,13 @@ module Afterburner
       @thread&.kill
     end
 
+    def loaded_library_files
+      return [] unless @root
+
+      prefixes = [@root, (File.realpath(@root) rescue @root)].uniq.map { "#{_1}/" }
+      $LOADED_FEATURES.select { |file| file.end_with?(".rb") && prefixes.any? { file.start_with?(_1) } }
+    end
+
     def reload(file)
       shown = file.delete_prefix("#{@root}/")
       $LOADED_FEATURES.delete(file)
@@ -309,12 +329,15 @@ module Afterburner
       say("(reloading #{shown} failed, so the previous version stays: #{e.message.lines.first&.chomp})")
     end
 
-    # Runs reload_changed_files before IRB evaluates each command.
+    # Around each command IRB evaluates: reloads what changed before it, and
+    # notes what it loaded after it.
     module ReloadBeforeEachCommand
       def evaluate(...)
         session = Fiber[:afterburner_session]
         session.reload_changed_files if session.is_a?(Console)
         super
+      ensure
+        session.note_loaded_files if session.is_a?(Console)
       end
     end
 

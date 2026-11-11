@@ -122,6 +122,23 @@ class ConsoleTest < Minitest::Test
     end
   end
 
+  # The common case: require, edit, then the next command.
+  def test_an_edit_right_after_the_require_is_picked_up
+    with_src do |src, console, prompt|
+      file = File.join(src, "lib", "edit_probe.rb")
+      File.write(file, "class EditProbe\n  def version = 1\nend\n")
+      prompt.eval("require_relative 'lib/edit_probe'")
+      console.note_loaded_files # after the require's command
+      File.write(file, "class EditProbe\n  def version = 2\nend\n")
+      File.utime(Time.now + 5, Time.now + 5, file)
+      console.reload_changed_files # before the next command
+      assert_equal 2, prompt.eval("EditProbe.new.version")
+    end
+  ensure
+    Object.send(:remove_const, :EditProbe) if Object.const_defined?(:EditProbe)
+    $LOADED_FEATURES.reject! { _1.end_with?("lib/edit_probe.rb") }
+  end
+
   def test_load_at_the_prompt_resolves_against_the_scripts_folder
     with_src do |src, _console, prompt|
       File.write(File.join(src, "lib", "loaded_probe.rb"), "class PromptLoadResolveProbe; end\n")
@@ -137,7 +154,7 @@ class ConsoleTest < Minitest::Test
       file = File.join(src, "lib", "reload_probe.rb")
       File.write(file, "class ReloadProbe\n  def version = 1\nend\n")
       prompt.eval("require_relative 'lib/reload_probe'")
-      console.reload_changed_files # the console notes what's loaded after each command
+      console.note_loaded_files # as after each command
       assert_equal 1, prompt.eval("ReloadProbe.new.version")
 
       File.write(file, "class ReloadProbe\n  def version = 2\nend\n")

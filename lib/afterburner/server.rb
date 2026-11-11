@@ -314,6 +314,10 @@ module Afterburner
       @log.info("console script pid #{stub.pid} ended") if closed_by_script
       return unless closed_by_script && (client = stub.client)
 
+      # Free the slot before the console reconnects, or it could be refused as
+      # "another console" by its own old connection.
+      @console_client = nil if @console_client.equal?(client)
+
       say(client, op: "detached", message: "The console script stopped in the game.")
       client.close
     rescue StandardError
