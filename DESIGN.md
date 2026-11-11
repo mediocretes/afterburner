@@ -92,19 +92,41 @@ was away: if it no longer fits, it sends `exit` with a message saying to run it 
 game kill it at the first call over. Resumes are logged at debug; the server sums them up in one line once
 they've stopped arriving for 3 s.
 
-**Console** (`/console`): `afterburner console` connects with `?ram=`, GB or a percentage (default `80%`).
-afterburner pushes `afterburner/console.js`, a stub with that claim whose script is the special name `@console`,
-and sends `status` messages until it's run. A percentage is worked out by the stub, since only the game knows
-the server it runs on. It starts at 1.7 GB (base plus `getServerMaxRam` and `getServerUsedRam`), then claims
-the share of what's free plus what it holds. The stub's `start` carries what it holds, and the console reports
-that.
+**Console** (`/console`): `afterburner console` connects with `?ram=` (GB or a percentage, only when you gave
+`--ram`; default `80%`) and `?rejoin=1` when it's reconnecting. The console script in the game
+(`afterburner/console.js`, script name `@console`) outlives any one console:
+
+- With none running, afterburner pushes it with that claim and sends `status` messages until it's run. A
+  percentage is worked out by the stub, since only the game knows the server it runs on: it starts at 1.7 GB
+  (base plus `getServerMaxRam` and `getServerUsedRam`), then claims the share of what's free plus what it holds.
+- When it connects (`start`, possibly `resumed` after a restart) with no console waiting, afterburner **parks** it:
+  keeps reading its socket, so a script killed in the game is noticed, but relays nothing. A second console script
+  finds one running and gets `exit` with a message, not `fail` (no error dialog).
+- A console that connects attaches to the parked script at once, with no `run` in the game. If `--ram` was given,
+  the `attached` message notes that this script already holds its RAM.
+- Leaving the console parks the script again; `AB.end_console` sends it `exit`, freeing its RAM.
+
+Each attach is a session. afterburner sends the stub `{op: "attach", session: n}` and relays nothing from it until
+it echoes `{op: "attached", session: n}`. The stub handles one message at a time, so anything it sends before the
+echo (the answer to a call the last console left in flight) is dropped rather than reaching the new console; if the
+echo is slow behind a long call, the console is told why it's waiting. Then it relays `call` frames to the stub and
+`result`/`error` back.
+
+The console client (`Console`) runs IRB on the main thread and its WebSocket in a background thread's reactor,
+talking through queues and a condition variable. That thread reconnects whenever the connection ends: afterburner
+restarting, or the script stopping (afterburner says `detached` and closes). Reconnecting sets `rejoin`, and
+afterburner waits a few seconds for the console script to reconnect before asking you to run one. An `ns` call
+waits while detached; one that was in flight when the connection dropped raises, since it may or may not have
+happened. Replies are matched by id.
+
+Before IRB evaluates each command (a prepended `IRB::Context#evaluate`), the console reloads files from the
+scripts folder in `$LOADED_FEATURES` whose mtime changed, through `require` at the real top level, then shares new
+classes into the prompt's context. A file that fails to load leaves the previous version and says so.
 
 Every stub's `main` starts with `ns.ramOverride(<number>);`. The game reads that as the script's whole static
 RAM without scanning the code, but only as the first statement and only with a literal. Anything else and it
 charges every name in the stub and `proxy.js` that matches any `ns` function, which for the console stub came
-to 33.7 GB. Then it relays: `call` frames from the console to the stub, `result`/`error`
-back. Leaving the console sends the stub `exit`; the stub stopping sends the console `ended`. On the console
-side, IRB runs on the main thread and the WebSocket in a background thread's reactor, talking through queues.
+to 33.7 GB.
 
 **`/save`, `/ram?file=`, and `/sources`**: plain HTTP for the CLI. `/sources` lists the save's copies of the Ruby scripts, with contents and `mtime`, for `afterburner restore`. `/save` returns the bytes `getSaveFile` describes (a
 binary save arrives as one character per byte) with a suggested file name; `/ram` returns `calculateRam`.

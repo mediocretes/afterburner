@@ -155,15 +155,29 @@ gone; unlike a reload, the old run's `at_exit` blocks don't run, because the pro
 If the code now needs more RAM than the process claimed, the script ends quietly and its log says to run it again.
 
 Scripts on other servers resume too. When the game connects, afterburner brings every copy of
-`afterburner/proxy.js` your scripts have put on other servers (with `ns.scp`) up to date with its own. The console
-ends when afterburner stops; start it again.
+`afterburner/proxy.js` your scripts have put on other servers (with `ns.scp`) up to date with its own.
+
+## The console
+
+`afterburner console` is IRB with `ns` live in the game. The first time, it asks you to run
+`afterburner/console.js` in the game; that script then keeps running, so every later `afterburner console` attaches
+to it straight away. It holds its RAM while it waits: `AB.end_console` (or killing it in the game) frees it.
+
+The console stays open when afterburner restarts or the console script stops. It reattaches in the background,
+and an `ns` call you make meanwhile waits for it (Ctrl-C gives up). A game reload restarts the console script with
+everything else, and the console reattaches to it.
+
+Before each command, library files you've loaded from your scripts folder (`require_relative 'lib/server'`) are
+loaded again if they changed, so the command sees your edits. As with a reload in a running script, a method you
+delete from a file stays defined until you restart the console. `require_relative` and `load` at the prompt
+resolve against your scripts folder, as they would for a script at its top.
 
 ## Commands
 
 | | |
 |---|---|
 | `afterburner watch` | Serve the game: sync files, run Ruby scripts. Leave it running. |
-| `afterburner console [--ram AMOUNT]` | IRB with `ns` live in the game. It pushes `afterburner/console.js`; run that in the game and type away. It claims 80% of the RAM free on the server you run it on, or what `--ram` says: GB (`--ram 8`) or another share (`--ram 50%`). The game charges each new function you call against the claim. `ns.<Tab>` completes, and `AB.doc(:name)` shows a function's docs. |
+| `afterburner console [--ram AMOUNT]` | IRB with `ns` live in the game (see [The console](#the-console)). The first time, it pushes `afterburner/console.js` for you to run in the game; after that it attaches to the one running. It claims 80% of the RAM free on the server you run it on, or what `--ram` says: GB (`--ram 8`) or another share (`--ram 50%`). The game charges each new function you call against the claim. `ns.<Tab>` completes, and `AB.doc(:name)` shows a function's docs. |
 | `afterburner save [FILE]` | Download the game's live save, as the in-game export would. |
 | `afterburner ram FILE...` | RAM a script needs: `.rb` files are scanned locally, with a breakdown; anything else is the game's own figure. |
 | `afterburner stub FILE.rb` | Print the JavaScript stub the game runs for a script. |

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "async"
+require "async/condition"
 require "async/http/endpoint"
 require "async/http/server"
 require "async/variable"
@@ -54,7 +55,9 @@ module Afterburner
                                            allow_deleting: config.allow_deleting, log:)
       @backup = SourceBackup.new(scripts: @scripts, log:)
       @link = nil
-      @console = nil
+      @console_stub = nil # the console script in the game, attached or parked
+      @console_client = nil # the `afterburner console` attached to it, or waiting for it
+      @console_arrived = Async::Condition.new
       @sessions = Set.new
       @stamps = nil
       @resumes = 0
@@ -155,7 +158,7 @@ module Afterburner
       case uri.path
       when "/" then websocket(request, allowed_origin?(origin), origin) { attach_game(_1) }
       when "/script" then websocket(request, allowed_origin?(origin), origin) { run_script(_1) }
-      when "/console" then websocket(request, origin.nil?, origin) { console(_1, query(uri)["ram"]) }
+      when "/console" then websocket(request, origin.nil?, origin) { console(_1, query(uri)) }
       when "/save" then origin.nil? ? save_response : refuse(origin)
       when "/ram" then origin.nil? ? ram_response(query(uri)["file"]) : refuse(origin)
       when "/sources" then origin.nil? ? sources_response : refuse(origin)
@@ -213,7 +216,7 @@ module Afterburner
 
     def run_script(connection)
       start = read_json(connection) or return
-      return attach_console_stub(connection, start) if start["script"] == Stubs::CONSOLE_SCRIPT
+      return serve_console_stub(connection, start) if start["script"] == Stubs::CONSOLE_SCRIPT
 
       # Right after a save loads, scripts can start before the game's Remote
       # API has reconnected and sent its definitions; give it a moment.
@@ -252,80 +255,175 @@ module Afterburner
 
     # -- The console -----------------------------------------------------------
     #
-    # `afterburner console` connects here and waits; afterburner pushes a
-    # console stub claiming the RAM asked for, and you run it in the game. Then
-    # this relays: ns calls from your IRB to the stub, answers back.
+    # The console script in the game (afterburner/console.js) outlives any one
+    # `afterburner console`. Leaving the console parks it, still holding its
+    # RAM, and the next console attaches to it without another `run` in the
+    # game. If afterburner restarts, it reconnects like any stub, and a console
+    # that's still open reattaches. It ends when it's killed in the game, or by
+    # AB.end_console. A second console script finds one running and ends.
+    #
+    # Each attach is a session: afterburner sends the stub {op: "attach",
+    # session: n} and relays nothing from it until it echoes {op: "attached",
+    # session: n}. The stub handles one message at a time, so anything it sends
+    # before the echo (the answer to a call the last console left in flight)
+    # is dropped instead of reaching the new console.
 
-    def console(client, ram)
-      return say(client, op: "error", message: "Another console is already open.") if @console
+    ConsoleStub = Struct.new(:socket, :pid, :ram, :client, :session, :ready, :ended, :changed)
+
+    # How long a console reattaching after a restart waits for the console
+    # script to reconnect before asking you to run one; how long an attach
+    # waits on a call in progress before saying so.
+    REJOIN_PATIENCE = 6
+    BUSY_NOTICE = 1
+
+    # The console script's connection: owned here for its whole life, parked
+    # or attached, so a script killed in the game is noticed even while parked.
+    def serve_console_stub(socket, start)
+      if (running = @console_stub)
+        return say(socket, op: "exit", message: "afterburner: console script pid #{running.pid} is already running, so " \
+                                                "this one isn't needed.")
+      end
+
+      stub = ConsoleStub.new(socket, start["pid"], start["ram"], nil, 0, false, false, Async::Condition.new)
+      @console_stub = stub
+      @log.info("console script pid #{stub.pid} #{start['resumed'] ? 'reconnected' : 'is running'} (#{stub.ram} GB)")
+      @console_arrived.signal
+      while (message = read_json(socket))
+        from_console_stub(stub, message)
+      end
+      closed_by_script = true
+    ensure
+      console_stub_ended(stub, closed_by_script:) if stub
+    end
+
+    def from_console_stub(stub, message)
+      if message["op"] == "attached"
+        stub.ready = true if message["session"] == stub.session
+        stub.changed.signal
+      elsif stub.ready && stub.client
+        say(stub.client, message)
+      end
+    end
+
+    # closed_by_script: the script's side closed. Otherwise afterburner itself
+    # is stopping, and the console notices that for itself.
+    def console_stub_ended(stub, closed_by_script:)
+      stub.ended = true
+      @console_stub = nil if @console_stub.equal?(stub)
+      stub.changed.signal
+      @log.info("console script pid #{stub.pid} ended") if closed_by_script
+      return unless closed_by_script && (client = stub.client)
+
+      say(client, op: "detached", message: "The console script stopped in the game.")
+      client.close
+    rescue StandardError
+      nil
+    end
+
+    # `afterburner console` connects here: ?ram= only if you gave --ram, and
+    # ?rejoin=1 when it's reconnecting after losing afterburner or the script.
+    def console(client, params)
+      return say(client, op: "error", message: "Another console is already open.") if @console_client
 
       begin
-        claim = ConsoleClaim.parse(ram || ConsoleClaim::DEFAULT)
+        claim = ConsoleClaim.parse(params["ram"] || ConsoleClaim::DEFAULT)
       rescue ArgumentError => e
         return say(client, op: "error", message: e.message)
       end
-
-      @console = Async::Variable.new
-      waiting = Async { wait_for_console_stub(client, claim) }
+      @console_client = client
+      existing = !@console_stub.nil?
+      waiting = Async { find_console_stub(client, claim, rejoin: params.key?("rejoin")) }
       # The console sends nothing until it's attached, so a read that ends
       # means you left while it was waiting.
       left = Async do
         client.read
         waiting.stop
       end
-      stub, start, done = waiting.wait
+      stub = waiting.wait
       left.stop
-      return unless stub
+      return unless stub && attach_console(stub, client, ram_note: existing && params.key?("ram"))
 
-      granted = start["ram"] || claim.gb
-      @log.info("console attached to pid #{start['pid']} (#{granted} GB)")
-      say(client, op: "attached", pid: start["pid"], ram: granted)
-      relay(client, stub)
+      relay_console(stub, client)
     ensure
-      done&.resolve(true)
-      @console = nil
+      @console_client = nil if @console_client.equal?(client)
+      park_console(stub, client) if stub
     end
 
-    def wait_for_console_stub(client, claim)
+    def find_console_stub(client, claim, rejoin:)
+      if rejoin && !@console_stub
+        say(client, op: "status", message: "Waiting for the console script to reconnect...")
+        wait_for_console_stub(REJOIN_PATIENCE)
+      end
+      return @console_stub if @console_stub
+
       announced = false
-      until (link = live_link)
+      until (link = live_link) || @console_stub
         say(client, op: "status", message: "Waiting for the game to connect its Remote API to port #{@config.port}...") unless announced
         announced = true
         sleep TICK
       end
-      link.push_file(Stubs::CONSOLE, @stubs.console_source(claim))
-      say(client, op: "status", message: "In the game, run: run #{Stubs::CONSOLE} (it claims #{claim}; change that with --ram)")
-      @console.wait
+      unless @console_stub
+        link.push_file(Stubs::CONSOLE, @stubs.console_source(claim))
+        say(client, op: "status", message: "In the game, run: run #{Stubs::CONSOLE} (it claims #{claim}; change that with --ram)")
+      end
+      wait_for_console_stub until @console_stub
+      @console_stub
     rescue GameLink::Error => e
       say(client, op: "error", message: e.message)
       nil
     end
 
-    def attach_console_stub(stub, start)
-      waiting = @console
-      if waiting.nil? || @console_claimed.equal?(waiting)
-        return say(stub, op: "fail", message: "No console is waiting for this. Run `afterburner console` first.")
-      end
+    def wait_for_console_stub(seconds = nil)
+      return @console_arrived.wait unless seconds
 
-      @console_claimed = waiting
-      done = Async::Variable.new
-      waiting.resolve([stub, start, done])
-      done.wait
+      Async::Task.current.with_timeout(seconds) { @console_arrived.wait until @console_stub }
+    rescue Async::TimeoutError
+      nil
     end
 
-    def relay(client, stub)
-      upstream = Async do
-        while (message = client.read)
-          forward(stub, message)
+    def attach_console(stub, client, ram_note:)
+      stub.client = client
+      stub.ready = false
+      session = (stub.session += 1)
+      say(stub.socket, op: "attach", session:)
+      noticed = false
+      until stub.ready || stub.ended
+        begin
+          Async::Task.current.with_timeout(BUSY_NOTICE) { stub.changed.wait }
+        rescue Async::TimeoutError
+          unless noticed
+            say(client, op: "status", message: "The console script is finishing a call the last console started; " \
+                                               "attaching when it's done...")
+          end
+          noticed = true
         end
-        say(stub, op: "exit") # you left the console; let the stub end
       end
-      while (message = stub.read)
-        forward(client, message)
+      return false if stub.ended
+
+      @log.info("console attached to pid #{stub.pid} (#{stub.ram} GB)")
+      note = "--ram applies when a console script starts; this one already holds #{stub.ram} GB (AB.end_console ends it)." if ram_note
+      say(client, op: "attached", pid: stub.pid, ram: stub.ram, note:)
+      true
+    end
+
+    def relay_console(stub, client)
+      while (message = read_json(client))
+        case message["op"]
+        when "call" then say(stub.socket, message)
+        when "end_console"
+          @log.info("console script pid #{stub.pid} ended from the console")
+          say(stub.socket, op: "exit", message: "afterburner: ended from the console (AB.end_console).")
+        end
       end
-      say(client, op: "ended", message: "The console script stopped in the game.")
-    ensure
-      upstream&.stop
+    end
+
+    # You left the console; the console script waits for the next one.
+    def park_console(stub, client)
+      return unless stub.client.equal?(client)
+
+      stub.client = nil
+      stub.ready = false
+      @log.info("console left; console script pid #{stub.pid} stays running for the next one") unless stub.ended
     end
 
     # -- Local tools -----------------------------------------------------------

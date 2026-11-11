@@ -33,6 +33,11 @@ First version.
 - Fixed: `ns.public_send(:name, ...)` and `ns.send` raised `NoMethodError`, though the RAM scan charged them.
 - Fixed: Ruby's "already initialized constant" warnings reached a script's terminal when a library was loaded
   again, as after a reload that failed.
+- The console script keeps running between consoles, so `afterburner console` attaches to it without another `run`
+  in the game; `AB.end_console` ends it. The console stays open across afterburner restarts and the script
+  stopping, and reattaches by itself.
+- The console reloads library files from the scripts folder that changed, before each command. `load` at the
+  prompt resolves against the scripts folder, as `require_relative` does.
 - The RAM scan charges only code a script can reach, so requiring a library of classes no longer charges a script
   for methods it never calls. `afterburner ram` lists what it skipped, and falls back to charging everything when
   the code dispatches in ways it can't follow.

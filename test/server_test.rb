@@ -654,38 +654,263 @@ class ServerTest < Minitest::Test
 
   # -- The console -----------------------------------------------------------
 
+  # Plays the console script's first message; the block gets its socket.
+  def console_script(pid: 42, ram: 4.0, resumed: false, &)
+    connect("/script") do |stub|
+      transmit(stub, op: "start", script: "@console", args: [], pid:, ram:, resumed:)
+      yield stub
+    end
+  end
+
+  # Receives an attach and echoes it, as the console script does.
+  def echo_attach(stub)
+    message = receive(stub)
+    assert_equal "attach", message["op"]
+    transmit(stub, op: "attached", session: message["session"])
+    message
+  end
+
+  # Reads a console's messages up to "attached"; returns [statuses, attached].
+  def until_attached(client)
+    statuses = []
+    until (message = receive(client))["op"] == "attached"
+      statuses << message["message"]
+    end
+    [statuses, message]
+  end
+
+  def with_game
+    game = FakeGame.new(self)
+    game_task = Async { game.run }
+    eventually { game.methods.include?("getAllFiles") }
+    yield game
+  ensure
+    game_task&.stop
+  end
+
   def test_the_console_relays_calls_to_its_stub
     serve do
-      game = FakeGame.new(self)
-      game_task = Async { game.run }
-      eventually { game.methods.include?("getAllFiles") }
-      relayed = []
-
-      console = Async do
-        connect("/console?ram=2.5") do |client|
-          statuses = []
-          until (message = receive(client))["op"] == "attached"
-            statuses << message["message"]
+      with_game do |game|
+        relayed = []
+        console = Async do
+          connect("/console?ram=2.5") do |client|
+            statuses, = until_attached(client)
+            assert_includes statuses.last, "run afterburner/console.js"
+            transmit(client, op: "call", id: 1, path: ["getHackingLevel"], args: [])
+            relayed << receive(client)
           end
-          assert_includes statuses.last, "run afterburner/console.js"
-          transmit(client, op: "call", id: 1, path: ["getHackingLevel"], args: [])
-          relayed << receive(client)
+        end
+        eventually { game.pushed.key?("afterburner/console.js") }
+        assert_includes game.pushed["afterburner/console.js"], "ns.ramOverride(2.5);"
+        console_script do |stub|
+          echo_attach(stub)
+          call = receive(stub)
+          assert_equal ["getHackingLevel"], call["path"]
+          transmit(stub, op: "result", id: call["id"], value: 5)
+          console.wait
+          sleep 0.1
+          refute stub_ended?(stub), "leaving the console parks the script rather than ending it"
+        end
+        assert_equal [{ "op" => "result", "id" => 1, "value" => 5 }], relayed
+      end
+    end
+  end
+
+  # True if afterburner has told the stub to exit (or closed it) within a moment.
+  def stub_ended?(stub)
+    message = Async::Task.current.with_timeout(0.2) { receive(stub) }
+    message.nil? || message["op"] == "exit"
+  rescue Async::TimeoutError
+    false
+  end
+
+  def test_the_next_console_attaches_to_the_parked_script_without_a_run
+    serve do |_dir, log|
+      with_game do |game|
+        console_script(pid: 9, ram: 25.6) do |stub|
+          eventually { log.string.include?("console script pid 9 is running") }
+          2.times do |n|
+            console = Async do
+              connect("/console") do |client|
+                statuses, attached = until_attached(client)
+                refute statuses.any? { _1.to_s.include?("run afterburner/console.js") }, "no run needed (console #{n + 1})"
+                assert_equal 9, attached["pid"]
+              end
+            end
+            echo_attach(stub)
+            console.wait
+            eventually { log.string.scan("stays running for the next one").size == n + 1 }
+          end
+          refute game.pushed.key?("afterburner/console.js"), "nothing to push: the script is already running"
         end
       end
+    end
+  end
 
-      eventually { game.pushed.key?("afterburner/console.js") }
-      assert_includes game.pushed["afterburner/console.js"], "ns.ramOverride(2.5);"
-      connect("/script") do |stub|
-        transmit(stub, op: "start", script: "@console", args: [], pid: 42)
-        call = receive(stub)
-        assert_equal ["getHackingLevel"], call["path"]
-        transmit(stub, op: "result", id: call["id"], value: 5)
-        assert_equal "exit", receive(stub)["op"], "leaving the console ends the stub"
+  def test_an_answer_the_last_console_left_in_flight_is_dropped
+    serve do
+      with_game do
+        console_script do |stub|
+          first = Async do
+            connect("/console") do |client|
+              until_attached(client)
+              transmit(client, op: "call", id: 1, path: ["getHackingLevel"], args: [])
+            end # leaves before the answer
+          end
+          echo_attach(stub)
+          old_call = receive(stub)
+          first.wait
+          answered = []
+          second = Async do
+            connect("/console") do |client|
+              until_attached(client)
+              transmit(client, op: "call", id: 1, path: ["getHackingLevel"], args: [])
+              answered << receive(client)
+            end
+          end
+          attach = receive(stub)
+          assert_equal "attach", attach["op"]
+          transmit(stub, op: "result", id: old_call["id"], value: 111) # the old call finishing late
+          transmit(stub, op: "attached", session: attach["session"])
+          new_call = receive(stub)
+          transmit(stub, op: "result", id: new_call["id"], value: 222)
+          second.wait
+          assert_equal [222], answered.map { _1["value"] }
+        end
       end
-      console.wait
-      assert_equal [{ "op" => "result", "id" => 1, "value" => 5 }], relayed
-    ensure
-      game_task&.stop
+    end
+  end
+
+  def test_an_attach_behind_a_call_in_progress_says_so
+    serve do
+      with_game do
+        console_script do |stub|
+          statuses = nil
+          console = Async { connect("/console") { |client| statuses, = until_attached(client) } }
+          attach = receive(stub)
+          sleep(Afterburner::Server::BUSY_NOTICE + 0.3) # still finishing a long call
+          transmit(stub, op: "attached", session: attach["session"])
+          console.wait
+          assert(statuses.any? { _1.include?("finishing a call") })
+        end
+      end
+    end
+  end
+
+  def test_a_second_console_script_ends_quietly
+    serve do |_dir, log|
+      console_script(pid: 1) do
+        eventually { log.string.include?("console script pid 1 is running") }
+        console_script(pid: 2) do |second|
+          message = receive(second)
+          assert_equal "exit", message["op"], "an exit, not a failure with an error dialog"
+          assert_match(/pid 1 is already running/, message["message"])
+        end
+      end
+    end
+  end
+
+  def test_a_parked_script_that_dies_isnt_attached_to
+    serve do |_dir, log|
+      with_game do |game|
+        console_script(pid: 3) { eventually { log.string.include?("console script pid 3 is running") } }
+        eventually { log.string.include?("console script pid 3 ended") }
+        connect("/console") do |client|
+          message = receive(client)
+          assert_includes message["message"], "run afterburner/console.js"
+        end
+        assert game.pushed.key?("afterburner/console.js")
+      end
+    end
+  end
+
+  def test_end_console_ends_the_script_and_lets_the_console_know
+    serve do |_dir, log|
+      with_game do
+        console_script(pid: 5) do |stub|
+          console = Async do
+            connect("/console") do |client|
+              until_attached(client)
+              transmit(client, op: "end_console")
+              detached = receive(client)
+              assert_equal "detached", detached["op"]
+            end
+          end
+          echo_attach(stub)
+          exit = receive(stub)
+          assert_equal "exit", exit["op"]
+          stub.close
+          console.wait
+        end
+        eventually { log.string.include?("console script pid 5 ended") }
+      end
+    end
+  end
+
+  def test_ram_for_a_script_already_running_is_explained
+    serve do |_dir, log|
+      with_game do
+        console_script(pid: 6, ram: 25.6) do |stub|
+          eventually { log.string.include?("console script pid 6 is running") }
+          attached = nil
+          console = Async { connect("/console?ram=8") { |client| _, attached = until_attached(client) } }
+          echo_attach(stub)
+          console.wait
+          assert_match(/--ram applies when a console script starts; this one already holds 25.6 GB/, attached["note"])
+        end
+      end
+    end
+  end
+
+  def test_a_console_rejoining_waits_for_the_script_to_reconnect
+    serve do
+      with_game do |game|
+        statuses = attached = nil
+        console = Async { connect("/console?rejoin=1") { |client| statuses, attached = until_attached(client) } }
+        sleep 0.3
+        console_script(pid: 8, resumed: true) do |stub|
+          echo_attach(stub)
+          console.wait
+        end
+        assert_equal ["Waiting for the console script to reconnect..."], statuses
+        assert_equal 8, attached["pid"]
+        refute game.pushed.key?("afterburner/console.js")
+      end
+    end
+  end
+
+  # The console client itself: a call made while the console script is gone
+  # waits, the console reattaches to the next one, and the call goes through.
+  def test_the_console_client_reattaches_when_the_script_comes_back
+    serve do |dir, _log|
+      with_game do
+        out = StringIO.new
+        console = Afterburner::Console.new(port: PORT, ram: nil, definitions: File.join(dir, "NetscriptDefinitions.d.ts"), out:)
+        connection = Thread.new { console.send(:stay_connected) }
+        first = Thread.new { console.call(["getHackingLevel"], []) }
+        console_script(pid: 11) do |stub|
+          echo_attach(stub)
+          call = receive(stub)
+          transmit(stub, op: "result", id: call["id"], value: 1)
+          eventually { !first.alive? }
+        end # the script stops in the game
+        eventually { out.string.include?("The console script stopped in the game.") }
+        # A call made at the moment the script stopped says it may not have
+        # happened; this one comes after, so it waits for the next script.
+        second = Thread.new { console.call(["getHackingLevel"], []) }
+        console_script(pid: 12, resumed: true) do |stub|
+          echo_attach(stub)
+          call = receive(stub)
+          transmit(stub, op: "result", id: call["id"], value: 2)
+          eventually(timeout: 10) { !second.alive? }
+        end
+        assert_equal [1, 2], [first.value, second.value]
+        assert_includes out.string, "The console script stopped in the game."
+        assert_includes out.string, "Reattached to the console script (pid 12)."
+      ensure
+        console&.send(:leave)
+        connection&.join(3)
+      end
     end
   end
 
@@ -693,29 +918,17 @@ class ServerTest < Minitest::Test
   # Returns the console's status messages, its "attached" message, and the
   # stub the game was sent.
   def attach_console(path, granted:)
-    statuses = []
-    attached = stub_source = nil
+    statuses = attached = stub_source = nil
     serve do
-      game = FakeGame.new(self)
-      game_task = Async { game.run }
-      eventually { game.methods.include?("getAllFiles") }
-      console = Async do
-        connect(path) do |client|
-          until (message = receive(client))["op"] == "attached"
-            statuses << message["message"]
-          end
-          attached = message
+      with_game do |game|
+        console = Async { connect(path) { |client| statuses, attached = until_attached(client) } }
+        eventually { game.pushed.key?("afterburner/console.js") }
+        stub_source = game.pushed["afterburner/console.js"]
+        console_script(pid: 7, ram: granted) do |stub|
+          echo_attach(stub)
+          console.wait
         end
       end
-      eventually { game.pushed.key?("afterburner/console.js") }
-      stub_source = game.pushed["afterburner/console.js"]
-      connect("/script") do |stub|
-        transmit(stub, op: "start", script: "@console", args: [], pid: 7, ram: granted)
-        assert_equal "exit", receive(stub)["op"]
-      end
-      console.wait
-    ensure
-      game_task&.stop
     end
     [statuses, attached, stub_source]
   end
@@ -758,15 +971,6 @@ class ServerTest < Minitest::Test
         refute_equal "error", receive(client)["op"], "the first console should no longer count as open"
       end
       refute_includes log.string, "Another console"
-    end
-  end
-
-  def test_a_console_stub_with_no_console_waiting_is_refused
-    serve do
-      connect("/script") do |stub|
-        transmit(stub, op: "start", script: "@console", args: [], pid: 1)
-        assert_equal "fail", receive(stub)["op"]
-      end
     end
   end
 

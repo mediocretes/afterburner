@@ -292,6 +292,40 @@ async function main() {
     return output.match(/level=\d+/)[0];
   });
 
+  await check("the console script keeps running: the next console attaches without a run", async () => {
+    const console_ = afterburner(["console"]);
+    await waitUntil(() => console_.output.join("").includes("Attached to pid"), 10000, "the console to attach");
+    if (console_.output.join("").includes("run afterburner/console.js")) throw new Error("asked to run the script again");
+    console_.child.stdin.end('puts "level=#{ns.hacking_level}"\nexit\n');
+    const { code, output } = await console_.done;
+    if (code !== 0 || !/level=\d+/.test(output)) throw new Error(`exit ${code}:\n${output}`);
+  });
+
+  await check("the console stays open across an afterburner restart and reattaches", async () => {
+    const console_ = afterburner(["console"]);
+    let stopped = false;
+    try {
+      await waitUntil(() => console_.output.join("").includes("Attached to pid"), 10000, "the console to attach");
+      const closed = new Promise((resolve) => watcher.on("close", resolve));
+      watcher.kill();
+      await closed;
+      stopped = true;
+      await waitUntil(() => console_.output.join("").includes("afterburner went away"), 10000, "the console to notice");
+      const games = watchLog.filter((line) => /the game connected/.test(line)).length;
+      await startWatching();
+      stopped = false;
+      await waitUntil(() => console_.output.join("").includes("Reattached to the console script"), 30000, "the console to reattach");
+      // The game's Remote API reconnects on its own schedule; the checks after this need it.
+      await waitUntil(() => watchLog.filter((line) => /the game connected/.test(line)).length > games, 30000, "the game to reconnect");
+      console_.child.stdin.end('puts "level=#{ns.hacking_level}"\nexit\n');
+      const { code, output } = await console_.done;
+      if (code !== 0 || !/level=\d+/.test(output)) throw new Error(`exit ${code}:\n${output}`);
+    } finally {
+      console_.child.kill();
+      if (stopped) await startWatching(); // the checks after this need it
+    }
+  });
+
   await check("Ruby sources are kept in the save, and afterburner restore brings them back", async () => {
     await expectOutput(page, "ls afterburner/src", /greet\.rb\.txt/);
     const target = path.join(WORK, "restored");

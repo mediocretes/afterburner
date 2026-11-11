@@ -34,6 +34,15 @@ module Afterburner
              end)
       end
 
+      # Ends the console script in the game, freeing the RAM it holds. The
+      # console stays open and attaches to the next one you run.
+      def end_console
+        session = Fiber[:afterburner_session]
+        raise NameError.new("`AB.end_console` is for `afterburner console`", :end_console) unless session.respond_to?(:end_console)
+
+        session.end_console
+      end
+
       def inspect = "AB"
       alias to_s inspect
 
