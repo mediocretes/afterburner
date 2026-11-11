@@ -238,11 +238,14 @@ module Afterburner
       end
     end
 
-    # Another console is open, or --ram didn't parse: stop trying. A console
-    # rejoining waits instead for the other one to leave.
+    # Another console is attached: wait for it to leave (it may be the one you
+    # just left, not yet noticed). --ram didn't parse: stop trying.
     def refused(message)
-      if @ever_attached && message["message"].to_s.include?("Another console")
-        say("\nAnother console is attached; reattaching when it leaves...") unless @away_said
+      if message["message"].to_s.include?("Another console")
+        unless @away_said
+          say(@ever_attached ? "\nAnother console is attached; reattaching when it leaves..." :
+                               "Another console is attached; attaching when it leaves (Ctrl-C to stop)...")
+        end
         @away_said = true
         return :lost
       end
@@ -304,9 +307,14 @@ module Afterburner
       end
     end
 
+    # Says so before closing, so afterburner parks the console script at once
+    # rather than whenever it notices the connection close.
     def leave
       @leaving = true
-      @lock.synchronize { @requests&.push(nil) }
+      @lock.synchronize do
+        @requests&.push({ op: "leave" }) if @attached
+        @requests&.push(nil)
+      end
       @thread&.join(2)
       @thread&.kill
     end

@@ -735,6 +735,7 @@ class ServerTest < Minitest::Test
                 statuses, attached = until_attached(client)
                 refute statuses.any? { _1.to_s.include?("run afterburner/console.js") }, "no run needed (console #{n + 1})"
                 assert_equal 9, attached["pid"]
+                transmit(client, op: "leave") # as Console#leave does
               end
             end
             echo_attach(stub)

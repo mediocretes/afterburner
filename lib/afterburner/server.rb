@@ -413,6 +413,7 @@ module Afterburner
     def relay_console(stub, client)
       while (message = read_json(client))
         case message["op"]
+        when "leave" then break # parks now, without waiting for the socket to close
         when "call" then say(stub.socket, message)
         when "end_console"
           @log.info("console script pid #{stub.pid} ended from the console")
