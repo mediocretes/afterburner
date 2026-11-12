@@ -24,7 +24,7 @@ Warning[:experimental] = false
 Encoding.default_external = Encoding::UTF_8
 
 flags = {}
-console_ram = Afterburner::ConsoleClaim::DEFAULT
+console_ram = nil # only sent when you give --ram, so it can say when a running console script already has its RAM
 dry_run = false
 force = false
 parser = OptionParser.new do |opts|
