@@ -3,7 +3,9 @@
 require_relative "test_helper"
 require "async/http/endpoint"
 require "async/websocket/client"
+require "console/capture"
 require "net/http"
+require "securerandom"
 
 # Runs a real server, with this test playing the game: its Remote API
 # connection, the stubs it runs, and the local console.
@@ -973,6 +975,35 @@ class ServerTest < Minitest::Test
       end
       refute_includes log.string, "Another console"
     end
+  end
+
+  # Killing a console resets its connection on Windows (on macOS and Linux
+  # the system closes it cleanly), which this does on purpose.
+  def test_a_waiting_console_thats_killed_frees_it_for_the_next
+    captured = Console::Capture.new # where Async reports a task that failed
+    logger, Console.logger = Console.logger, Console::Logger.new(captured)
+    next_console = nil
+    serve do
+      reset_console("/console?ram=2")
+      sleep 0.1
+      connect("/console?ram=2") { |client| next_console = receive(client) }
+    end
+    refute captured.include?(/unhandled exception/), "the reset should be handled, not logged as a failed task"
+    refute_equal "error", next_console["op"], "the killed console should no longer count as open"
+  ensure
+    Console.logger = logger
+  end
+
+  # Opens a console over a bare socket, waits until afterburner is waiting on
+  # it, and resets the connection instead of closing it.
+  def reset_console(path)
+    socket = TCPSocket.new("localhost", PORT)
+    socket.write("GET #{path} HTTP/1.1\r\nHost: localhost:#{PORT}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" \
+                 "Sec-WebSocket-Key: #{SecureRandom.base64(16)}\r\nSec-WebSocket-Version: 13\r\n\r\n")
+    received = +""
+    received << socket.readpartial(4096) until received.include?("Waiting for")
+    socket.setsockopt(Socket::Option.linger(true, 0))
+    socket.close
   end
 
   def test_the_console_refuses_browsers

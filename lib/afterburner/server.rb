@@ -338,9 +338,10 @@ module Afterburner
       existing = !@console_stub.nil?
       waiting = Async { find_console_stub(client, claim, rejoin: params.key?("rejoin")) }
       # The console sends nothing until it's attached, so a read that ends
-      # means you left while it was waiting.
+      # means you left while it was waiting. read_json ends quietly on a reset
+      # as well as a close: killing a console resets its connection on Windows.
       left = Async do
-        client.read
+        read_json(client)
         waiting.stop
       end
       stub = waiting.wait
