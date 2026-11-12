@@ -52,3 +52,7 @@ First version.
   however long it takes, not just a minute.
 - Fixed: `require_relative` at the console prompt looked in afterburner's own folder. It now resolves against
   the scripts folder, so `require_relative 'lib/server'` works there as it does in a script.
+- Fixed: `afterburner console` didn't start on Windows with Ruby 4 (`cannot load such file -- fiddle/import`).
+  afterburner now depends on fiddle, which Ruby 4 already installs, so there's nothing to compile.
+- Fixed: on Windows, closing a console's window while it waited for the game left afterburner refusing the
+  next one with "Another console is already open."

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "test_helper"
+require "open3"
 
 class ConsoleTest < Minitest::Test
   include FixtureApi
@@ -177,5 +178,15 @@ class ConsoleTest < Minitest::Test
   def test_at_exit_says_its_for_scripts
     error = assert_raises(ArgumentError) { at_prompt("at_exit { }") }
     assert_match(/for scripts/, error.message)
+  end
+
+  # On Windows, irb's reline loads fiddle. Ruby 4 ships fiddle outside the
+  # default gems, so it loads inside a bundle only because afterburner
+  # depends on it.
+  def test_irb_and_fiddle_load_inside_the_bundle
+    gemfile = File.expand_path("../Gemfile", __dir__)
+    output, status = Open3.capture2e({ "BUNDLE_GEMFILE" => gemfile }, RbConfig.ruby, "-rbundler/setup",
+                                     "-e", 'require "fiddle/import"; require "irb"')
+    assert status.success?, output
   end
 end
