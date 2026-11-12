@@ -24,6 +24,11 @@ Gem::Specification.new do |spec|
   spec.add_dependency "async", "~> 2.46"
   spec.add_dependency "async-http", "~> 0.105"
   spec.add_dependency "async-websocket", "~> 0.30"
+  # Only for the console on Windows, where reline (under irb) loads fiddle.
+  # Ruby 4 ships fiddle installed but outside the default gems, so a bundle
+  # can't load it unless something depends on it. Drop this once a reline
+  # release has ruby/reline#917, which replaces fiddle with io-console.
+  spec.add_dependency "fiddle"
   spec.add_dependency "irb"
   spec.add_dependency "logger"
   spec.add_dependency "prism", ">= 1.0"

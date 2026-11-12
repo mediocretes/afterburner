@@ -338,6 +338,8 @@ It is not a sandbox for the Ruby you write.
 - **Windows**: tested by hand with the Steam build (Ruby 4.0.7 from RubyInstaller with DevKit), and the
   unit tests run there in CI. `io-event` uses its pure-Ruby `select` backend there. In PowerShell, run
   `ridk.cmd` rather than `ridk`: the default execution policy blocks `ridk.ps1`.
+  afterburner depends on `fiddle` for Windows alone: irb's reline loads it there, and Ruby 4 ships it
+  outside the default gems, so a bundle can load it only if something depends on it.
 
 ## Known limits
 
