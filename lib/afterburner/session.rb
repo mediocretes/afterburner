@@ -44,6 +44,9 @@ module Afterburner
   class Session
     attr_reader :script, :pid, :args, :ns, :logger, :files, :api
 
+    # The .rb file the game ran, as a real path (main_script? and program_file).
+    def program_file = @path
+
     def initialize(connection, api:, scripts:, log:, costs: nil, ram_api: nil)
       @connection = connection
       @api = api

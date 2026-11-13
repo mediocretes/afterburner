@@ -21,6 +21,8 @@ First version.
 - Fixed: `class Float … end` in a script made a new class instead of reopening Ruby's.
 - `ns` and `logger` work anywhere in a running script's code, including libraries and methods added to Ruby's
   classes, not only at the script's top level; likewise in the console.
+- `if main_script?` in place of `if __FILE__ == $0`, which can't work when `$0` is afterburner: true only in the
+  file the game ran, so a script can also be required by another without running. `program_file` is its path.
 - `AB`, for afterburner's own tools: `AB.functions(pattern)` lists functions with their RAM costs, and
   `AB.doc(name)` shows a function's Ruby call, keyword options, signature, and the game's docs.
 - `ns.methods` lists the Ruby names `ns` answers to, and `ns.<Tab>` completes them in the console.

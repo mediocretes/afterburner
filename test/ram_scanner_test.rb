@@ -22,6 +22,14 @@ class RamScannerTest < Minitest::Test
     assert_in_delta 1.6, scan("puts 'hi'").ram
   end
 
+  def test_main_script_and_program_file_cost_nothing
+    result = scan("if main_script?\n  puts program_file\nend\nputs main_script?(__FILE__)")
+    assert_in_delta 1.6, result.ram
+    assert_empty result.charges
+    assert_empty result.unknown
+    assert_nil result.fallback
+  end
+
   def test_counts_each_function_once
     result = scan("ns.hack('a'); ns.hack('b'); ns.server_max_money('a')")
     assert_equal %w[getServerMaxMoney hack], result.charges.map(&:name)

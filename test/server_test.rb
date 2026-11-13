@@ -402,6 +402,24 @@ class ServerTest < Minitest::Test
     assert_match(/only available while a Ruby script is running/, error.message)
   end
 
+  def test_main_script_is_true_only_in_the_file_the_game_ran
+    library = "module MainScriptProbe\n  FILE = __FILE__\n  AT_LOAD = main_script?\n  def self.inside = main_script?\nend\n"
+    script = "require_relative 'lib/probe'\n" \
+             "p [main_script?, main_script?(__FILE__), File.basename(program_file)]\n" \
+             "p [MainScriptProbe::AT_LOAD, MainScriptProbe.inside, main_script?(MainScriptProbe::FILE)]\n" \
+             "class Runner\n  def self.go = main_script?\nend\np Runner.go"
+    played = play(script, files: { "lib/probe.rb" => library })
+    assert_equal [["tprint", ['[true, true, "script.rb"]']], ["tprint", ["[false, false, false]"]], ["tprint", ["true"]]],
+                 played.calls, played.final["message"]
+  ensure
+    Object.send(:remove_const, :MainScriptProbe) if Object.const_defined?(:MainScriptProbe)
+  end
+
+  def test_main_script_in_a_script_in_a_subfolder
+    played = play("p [main_script?, program_file.end_with?('/src/jobs/manager.rb')]", name: "jobs/manager.rb")
+    assert_equal [["tprint", ["[true, true]"]]], played.calls, played.final["message"]
+  end
+
   def test_refuses_names_outside_the_scripts_or_in_lib
     ["../outside.rb", "/etc/passwd", "lib/helper.rb", "missing.rb"].each do |name|
       played = play("puts 1", files: { "lib/helper.rb" => "" }, start: { op: "start", script: name, args: [], pid: 1 })

@@ -172,6 +172,10 @@ the RAM scanner both use it, so anything a script can call is something it's cha
   the same way, so the same holds there. That `load` sends a `.rb` file through `require` (forgotten first, so
   it runs again), for the reason library reloads do: a plain `load` evaluates under the thread's top-level
   wrapper, which is another script's module while that script is paused inside its own wrapped load.
+- `main_script?` and `program_file` sit beside them in `ScriptAccess`, reading the session's path (a real path)
+  rather than `$0`, which is afterburner's own in every script. `main_script?` compares real paths against its
+  argument, by default the caller's file, so it's false in a library and, with no program file, at the console.
+  Neither calls the game, so neither costs RAM.
 - The console's prompt is a script's top level. `Console#prompt_binding` loads `console_prompt.rb` wrapped in a
   fresh `ScriptContext` module, as a script is loaded, and IRB runs on the binding that file leaves behind. So
   what works at the prompt works in a script: the same constants (afterburner's own `Server` and `Record` are

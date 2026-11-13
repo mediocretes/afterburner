@@ -20,6 +20,15 @@ class ConsoleTest < Minitest::Test
     assert_same AB, at_prompt("AB")
   end
 
+  def test_the_console_isnt_a_main_script
+    Fiber[:afterburner_session] = @console # as Console#start_irb does
+    refute at_prompt("main_script?")
+    refute at_prompt("main_script?(__FILE__)")
+    assert_nil at_prompt("program_file")
+  ensure
+    Fiber[:afterburner_session] = nil
+  end
+
   def test_afterburners_own_classes_stay_out_of_the_way
     assert_nil at_prompt("defined?(Server)")
     assert_nil at_prompt("defined?(Record)")
