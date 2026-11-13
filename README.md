@@ -130,9 +130,11 @@ Each running script gets its own `ns`, even when several share a library.
 writes to the script's log window (`ns.ui.open_tail` shows it).
 
 **Also there:** `ARGV` (the script's arguments), `exit`, `abort("why")`, `at_exit { }`, and Ruby's own
-`sleep` alongside `ns.sleep(ms)`. Errors from the game raise `NetscriptError`, which you can rescue; an
-uncaught Ruby exception shows up in the game's error dialog with its backtrace. Scripts can `require` any gem
-in your Gemfile.
+`sleep` alongside `ns.sleep(ms)`. `if main_script?` stands in for `if __FILE__ == $0`, which can't work here:
+every script runs inside afterburner's process, so `$0` is afterburner. It's true only in the file the game
+ran, so a script also works as a library another one requires, and `program_file` is that file's path. Errors
+from the game raise `NetscriptError`, which you can rescue; an uncaught Ruby exception shows up in the game's
+error dialog with its backtrace. Scripts can `require` any gem in your Gemfile.
 
 ## Hot reload
 

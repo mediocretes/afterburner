@@ -86,9 +86,33 @@ module Afterburner
     def ns = Afterburner::ScriptAccess.current(:ns).ns
     def logger = Afterburner::ScriptAccess.current(:logger).logger
 
+    # In place of `if __FILE__ == $0`, which can't work here: every script
+    # runs inside afterburner's process, so $0 is afterburner. True only in
+    # the file the game ran (file defaults to the caller's), so a script can
+    # also be required as a library without running. False at the console.
+    def main_script?(file = caller_locations(1, 1).first&.absolute_path) = Afterburner::ScriptAccess.main_script?(file)
+
+    # The full path of the .rb file the game ran; nil at the console.
+    def program_file = Afterburner::ScriptAccess.program_file
+
     def self.current(name)
       Fiber[:afterburner_session] or
         raise NameError.new("`#{name}` is only available while a Ruby script is running in the game", name)
+    end
+
+    # Only a script's Session has a program file; the console has none.
+    def self.program_file
+      session = Fiber[:afterburner_session]
+      session.program_file if session.respond_to?(:program_file)
+    end
+
+    def self.main_script?(file)
+      program = program_file
+      return false unless program && file
+
+      File.realpath(file) == File.realpath(program)
+    rescue SystemCallError
+      false
     end
   end
   ::Kernel.include(ScriptAccess)
