@@ -46,7 +46,7 @@ module Afterburner
       return if sorted == load
 
       FileUtils.mkdir_p(File.dirname(@path))
-      File.write(@path, "#{JSON.pretty_generate(sorted)}\n")
+      Afterburner.write_text(@path, "#{JSON.pretty_generate(sorted)}\n")
     end
   end
 end

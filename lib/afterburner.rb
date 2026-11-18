@@ -6,6 +6,11 @@ module Afterburner
   # (from a launcher, a scheduler, an editor), Ruby assumes US-ASCII, and the
   # game's definitions file isn't ASCII.
   def self.read_text(path) = File.read(path, encoding: Encoding::UTF_8)
+
+  # Writes text byte for byte. File.write writes in text mode, which on Windows
+  # turns every "\n" into "\r\n", so a file written there would differ from the
+  # same file written anywhere else.
+  def self.write_text(path, text) = File.binwrite(path, text)
 end
 
 require_relative "afterburner/version"

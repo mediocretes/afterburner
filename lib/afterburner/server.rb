@@ -196,7 +196,7 @@ module Afterburner
       definitions = link.definitions
       unless File.exist?(@config.definitions) && Afterburner.read_text(@config.definitions) == definitions
         FileUtils.mkdir_p(File.dirname(@config.definitions))
-        File.write(@config.definitions, definitions)
+        Afterburner.write_text(@config.definitions, definitions)
         @log.info("saved the game's #{File.basename(@config.definitions)}")
       end
       count = api.functions.count
