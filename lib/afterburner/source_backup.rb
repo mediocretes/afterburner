@@ -160,7 +160,7 @@ module Afterburner
         path = File.join(@root, step.name)
         back_up(path) if step.action == :replace
         FileUtils.mkdir_p(File.dirname(path))
-        File.write(path, @saved.find { _1.name == step.name }.content)
+        Afterburner.write_text(path, @saved.find { _1.name == step.name }.content)
       end
       steps
     end

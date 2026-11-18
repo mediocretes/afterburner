@@ -516,6 +516,7 @@ class ServerTest < Minitest::Test
 
   def test_connecting_syncs_definitions_files_the_proxy_and_stubs
     files = { "src/hello.rb" => "ns.hack('x')", "dist/plain.js" => "export async function main() {}", "dist/notes.md" => "no" }
+    written = nil
     serve(files:, filesync: { scriptsFolder: "dist" }, definitions: false) do |dir, _log|
       game = FakeGame.new(self, files: [{ "filename" => "gone.js", "content" => "#{Afterburner::Stubs::MARKER} from gone.rb." }])
       task = Async { game.run }
@@ -527,9 +528,13 @@ class ServerTest < Minitest::Test
       assert game.pushed.key?("plain.js")
       refute game.pushed.key?("notes.md")
       eventually { game.deleted.include?("gone.js") }
+      written = File.binread(File.join(dir, "NetscriptDefinitions.d.ts"))
     ensure
       task&.stop
     end
+    # The bytes too: File.read on Windows turns CRLF back into LF, so it can't see a CRLF write. Checked after
+    # serve: an assertion that fails inside it hangs the server tests that follow.
+    assert_equal FIXTURE_DEFINITIONS, written
   end
 
   def test_connecting_updates_proxy_copies_on_other_servers

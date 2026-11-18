@@ -378,6 +378,10 @@ What's most likely to break, and what watches for it:
   US-ASCII, and the game's definitions file isn't ASCII. afterburner reads every text file as UTF-8
   (`Afterburner.read_text`), and the CLI sets `Encoding.default_external` to UTF-8 so scripts behave as they do
   in a terminal.
+- **Line endings on Windows.** Ruby writes files there in text mode, turning `\n` into `\r\n`. afterburner writes
+  every file with `Afterburner.write_text` (`File.binwrite`), so they have the same bytes on every OS. The
+  Windows CI job checks the bytes, and `test/line_endings_test.rb` fails on any OS if a text-mode write
+  (`File.write`) comes back.
 
 `--verbose` logs every message between afterburner and running scripts.
 

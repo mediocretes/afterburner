@@ -58,3 +58,6 @@ First version.
   afterburner now depends on fiddle, which Ruby 4 already installs, so there's nothing to compile.
 - Fixed: on Windows, closing a console's window while it waited for the game left afterburner refusing the
   next one with "Another console is already open."
+- Fixed: on Windows, files afterburner wrote got CRLF line endings: the scripts `afterburner restore` writes,
+  the game's definitions file, and the measured RAM costs. They're written byte for byte now, with LF as on
+  every other OS.

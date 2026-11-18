@@ -94,12 +94,13 @@ class SourceBackupTest < Minitest::Test
 
   def test_restore_writes_and_backs_up_what_it_replaces
     write("mine.rb", "mine, newer")
-    saved = [copy("lib/new.rb", "brand new", Time.now), copy("mine.rb", "theirs", Time.now - 600)]
+    saved = [copy("lib/new.rb", "brand\nnew\n", Time.now), copy("mine.rb", "theirs\n", Time.now - 600)]
     restore = Afterburner::SourceRestore.new(root: @src, saved:, force: true, now: Time.at(0))
     steps = restore.run
     assert_equal %i[write replace], steps.map(&:action)
-    assert_equal "brand new", File.read(File.join(@src, "lib/new.rb"))
-    assert_equal "theirs", File.read(File.join(@src, "mine.rb"))
+    # binread: File.read on Windows turns CRLF back into LF, which would hide a CRLF write.
+    assert_equal "brand\nnew\n", File.binread(File.join(@src, "lib/new.rb"))
+    assert_equal "theirs\n", File.binread(File.join(@src, "mine.rb"))
     assert_equal "mine, newer", File.read(File.join(restore.backup_dir, "mine.rb"))
     refute File.exist?(File.join(@dir, "escape.rb"))
   end
