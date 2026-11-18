@@ -520,7 +520,8 @@ class ServerTest < Minitest::Test
       game = FakeGame.new(self, files: [{ "filename" => "gone.js", "content" => "#{Afterburner::Stubs::MARKER} from gone.rb." }])
       task = Async { game.run }
       eventually { game.pushed.key?("hello.js") }
-      assert_equal FIXTURE_DEFINITIONS, File.read(File.join(dir, "NetscriptDefinitions.d.ts"))
+      # binread: File.read on Windows turns CRLF back into LF, which would hide a CRLF write.
+      assert_equal FIXTURE_DEFINITIONS, File.binread(File.join(dir, "NetscriptDefinitions.d.ts"))
       assert_includes game.pushed.fetch("hello.js"), "ns.ramOverride(1.7);"
       assert_includes game.pushed.fetch("hello.js"), "await serve(ns, \"hello.rb\", #{PORT}, 1.7);"
       assert_equal Afterburner::Stubs.proxy_source, game.pushed.fetch("afterburner/proxy.js")
